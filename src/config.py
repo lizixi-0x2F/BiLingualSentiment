@@ -27,7 +27,7 @@ class Config:
     BATCH_SIZE = 128  # 批次大小
     LEARNING_RATE = 1e-3  # 优化学习率，批次增大4倍，学习率也增大相应倍数
     NUM_EPOCHS = 20  # 训练轮次上限
-    DROPOUT = 0.2
+    DROPOUT = 0.3    # 增加Dropout值以增强正则化
     DEVICE = 'cuda'  # 'cuda', 'cpu', 'mps'
     
     # 优化器配置
@@ -54,7 +54,7 @@ class Config:
     ENCODER_TYPE = 'lightweight'  # 编码器类型
     
     # 其他配置
-    WEIGHT_DECAY = 0.01
+    WEIGHT_DECAY = 0.02    # 增加权重衰减以增强正则化
     DEBUG_INFO = False  # 是否显示调试信息
     
     # 损失混合权重

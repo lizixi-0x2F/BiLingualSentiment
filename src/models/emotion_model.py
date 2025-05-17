@@ -211,10 +211,15 @@ class NCPLTCLayer(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
         
-        # 简单的前馈网络，用于特征转换
+        # 增加额外的注意力后dropout
+        self.attn_dropout = nn.Dropout(config.DROPOUT)
+        
+        # 增强正则化的前馈网络
         self.feed_forward = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size * 2),
             nn.GELU(),
+            nn.Dropout(config.DROPOUT),
+            nn.Linear(hidden_size * 2, hidden_size),
             nn.Dropout(config.DROPOUT)
         )
         
@@ -223,6 +228,8 @@ class NCPLTCLayer(nn.Module):
         residual = x
         x = self.norm1(x)
         attn_out = self.attention(x, mask)
+        # 应用注意力后的dropout
+        attn_out = self.attn_dropout(attn_out)
         
         # 添加残差连接，但要防止梯度爆炸
         x = residual + torch.clamp(attn_out, -1.0, 1.0)
@@ -263,12 +270,15 @@ class EmotionAnalysisModel(nn.Module):
             nn.Flatten()
         )
         
-        # 输出层
+        # 增强正则化的输出层
         self.output = nn.Sequential(
             nn.Linear(config.TRANSFORMER_HIDDEN_SIZE, config.TRANSFORMER_HIDDEN_SIZE // 2),
             nn.GELU(),
-            nn.Dropout(config.DROPOUT),
-            nn.Linear(config.TRANSFORMER_HIDDEN_SIZE // 2, config.OUTPUT_DIM),
+            nn.Dropout(config.DROPOUT),  # 使用配置的dropout值
+            nn.Linear(config.TRANSFORMER_HIDDEN_SIZE // 2, config.TRANSFORMER_HIDDEN_SIZE // 4),  # 新增的中间层
+            nn.GELU(),
+            nn.Dropout(config.DROPOUT),  # 新增的dropout层
+            nn.Linear(config.TRANSFORMER_HIDDEN_SIZE // 4, config.OUTPUT_DIM),
             nn.Tanh()  # 确保输出范围在[-1, 1]之间
         )
     
