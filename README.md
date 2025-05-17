@@ -1,10 +1,10 @@
-# 中英文混合情感分析模型（NCP-LTC-Transformer）
+# 中英文混合情感分析模型（NCP-LTC）
 
-基于神经回路策略(NCP)、液体时间常数网络(LTC)和Transformer的混合情感分析模型，用于预测文本的效价(Valence)和唤醒度(Arousal)值。
+基于神经回路策略(NCP)和液体时间常数网络(LTC)的情感分析模型，用于预测文本的效价(Valence)和唤醒度(Arousal)值。
 
 ## 项目概述
 
-本项目实现了一个创新的情感分析系统，将神经回路策略(NCP)与液体时间常数网络(LTC)和Transformer结合，使用轻量级文本编码器处理文本。系统可以同时分析中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
+本项目实现了一个创新的情感分析系统，基于神经回路策略(NCP)与液体时间常数网络(LTC)，使用轻量级文本编码器处理文本。系统可以同时分析中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
 
 ### 主要特点
 
@@ -71,7 +71,7 @@ pip install -r requirements.txt
 
 ## 模型架构
 
-本项目实现了一个综合性情感分析模型，主要组件包括：
+本项目实现了一个基于NCP-LTC的情感分析模型，主要组件包括：
 
 ```
 EmotionAnalysisModel
@@ -79,7 +79,7 @@ EmotionAnalysisModel
 ├── InputMapping (输入映射)
 ├── NCP_LTC Layer (神经动力学处理)
 │   ├── NCPAttention (神经回路注意力)
-│   └── NCP_LNN (液体时间常数网络)
+│   └── NCP_LNN (液体神经网络)
 └── OutputLayer (带tanh激活的回归头)
 ```
 
@@ -169,9 +169,8 @@ EmotionAnalysisModel
 | SPARSITY | NCP稀疏连接度 | 0.15 |
 | LAMBDA_WEIGHT | 混合损失权重λ | 0.7 |
 | LEARNING_RATE | 初始学习率 | 0.0003 |
-| TRANSFORMER_HIDDEN_SIZE | 隐藏层大小 | 512 |
+| HIDDEN_SIZE | 隐藏层大小 | 512 |
 | DROPOUT | Dropout率 | 0.1 |
-| NUM_HEADS | 多头注意力头数 | 8 |
 | TAU_MIN/TAU_MAX | 时间常数范围 | 1.0/20.0 |
 
 ## 排错与优化
