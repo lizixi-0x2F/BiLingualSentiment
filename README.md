@@ -1,7 +1,5 @@
 # LTC-NCP-VA: 基于液态时间常数网络的文本情感价效度分析
 
-![模型架构](assets/model_architecture.png)
-
 ## 项目概述
 
 LTC-NCP-VA是一个专注于文本情感价效度(Valence-Arousal)分析的深度学习框架，基于液态时间常数(Liquid Time-Constant)网络与神经电路策略(Neural Circuit Policy)的创新组合。本项目能够从文本中提取情感的两个核心维度：价值(Valence，情感的正负极性)和效度(Arousal，情感的激烈程度)，实现更细粒度的情感分析。
@@ -96,7 +94,7 @@ python src/train.py --config configs/valence_enhanced.yaml --epochs 50
 
 在测试集上评估模型性能：
 ```bash
-python src/evaluate.py --ckpt runs/valence_enhanced_5m/best_model.pt --output results/evaluation
+python src/evaluate.py --ckpt runs/models/best_model.pt --output results/evaluation
 ```
 
 ### 情感预测
@@ -127,8 +125,15 @@ python src/emotion_predict.py
 │   └── emotion_predict.py  # 情感预测脚本
 ├── scripts/                # 辅助脚本
 ├── data/                   # 数据目录
+│   ├── processed/          # 处理后的数据
+│   └── raw/                # 原始数据
 ├── checkpoints/            # 模型检查点
-└── results/                # 评估结果
+├── runs/                   # 训练运行目录
+│   └── models/             # 训练好的模型
+├── logs/                   # 日志文件
+├── results/                # 评估结果
+├── docs/                   # 文档
+└── reports/                # 项目报告
 ```
 
 ## 性能指标
