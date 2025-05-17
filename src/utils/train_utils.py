@@ -38,52 +38,6 @@ class RMSELoss(torch.nn.Module):
         else:  # 'none'
             return rmse
 
-# 一致性相关系数损失函数
-class CCLoss(torch.nn.Module):
-    def __init__(self, reduction='mean'):
-        super(CCLoss, self).__init__()
-        self.reduction = reduction
-        
-    def forward(self, pred, target):
-        # 确保输入形状一致
-        batch_size = pred.size(0)
-        dim = pred.size(1)
-        
-        # 初始化损失
-        loss = torch.zeros(dim, device=pred.device)
-        
-        # 对每个维度分别计算CCC
-        for i in range(dim):
-            pred_i = pred[:, i]
-            target_i = target[:, i]
-            
-            # 计算均值和标准差
-            mean_pred = torch.mean(pred_i)
-            mean_target = torch.mean(target_i)
-            
-            var_pred = torch.var(pred_i, unbiased=False)
-            var_target = torch.var(target_i, unbiased=False)
-            
-            # 计算协方差
-            covar = torch.mean((pred_i - mean_pred) * (target_i - mean_target))
-            
-            # 计算CCC
-            numerator = 2 * covar
-            denominator = var_pred + var_target + (mean_pred - mean_target) ** 2 + 1e-10
-            
-            ccc = numerator / denominator
-            
-            # CCC值范围为[-1,1]，转换为损失
-            loss[i] = 1 - ccc
-        
-        # 根据reduction方式返回损失
-        if self.reduction == 'mean':
-            return torch.mean(loss)
-        elif self.reduction == 'sum':
-            return torch.sum(loss)
-        else:  # 'none'
-            return loss
-
 def train_epoch(model, dataloader, optimizer, criterion, device, grad_clip=None, debug_info=False, iterations_per_batch=50):
     model.train()
     total_loss = 0
@@ -292,27 +246,21 @@ def evaluate(model, dataloader, criterion, device, debug_info=False):
 
 
 def plot_learning_curves(train_losses, val_losses, save_dir):
-    try:
-        # 创建保存目录
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # 绘制损失曲线
-        plt.figure(figsize=(10, 5))
-        plt.plot(train_losses, label='训练损失')
-        plt.plot(val_losses, label='验证损失')
-        plt.xlabel('训练轮次')
-        plt.ylabel('损失值')
-        plt.title('情感分析模型学习曲线')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'loss_curve.png'))
-        plt.close()
-        
-        print(f"✓ 学习曲线已保存至: {os.path.join(save_dir, 'loss_curve.png')}")
-    except ImportError:
-        print("! 未安装matplotlib，学习曲线未绘制")
-    except Exception as e:
-        print(f"! 绘制学习曲线出错: {e}")
+    # 创建保存目录
+    os.makedirs(save_dir, exist_ok=True)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # 保存图表
+    plt.savefig(os.path.join(save_dir, 'learning_curves.png'))
+    plt.close()
 
 
 def save_metrics(metrics, epoch, save_dir):
