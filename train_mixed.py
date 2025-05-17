@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.config import Config
 from src.models.emotion_model import EmotionAnalysisModel
 from src.utils.data_utils import prepare_dataloaders
-from src.utils.train_utils import train_epoch, evaluate, plot_learning_curves, save_metrics, RMSELoss, CCLoss
+from src.utils.train_utils import train_epoch, evaluate, plot_learning_curves, save_metrics, RMSELoss
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
