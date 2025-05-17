@@ -14,6 +14,7 @@
 - **稳定性强**：采用Xavier×2初始化和tanh激活函数，确保模型稳定收敛
 - **资源友好**：相比大型预训练模型，内存和计算需求更低
 - **R²优化策略**：使用R²指标选择最佳模型，提升模型性能
+- **增强正则化**：使用多层Dropout和更高的权重衰减，提高泛化能力
 
 ### 技术亮点
 
@@ -86,7 +87,7 @@ EmotionAnalysisModel
 ├── NCP_LTC Layer (神经动力学处理)
 │   ├── NCPAttention (神经回路注意力)
 │   └── NCP_LNN (液体神经网络)
-└── OutputLayer (带tanh激活的回归头)
+└── OutputLayer (带tanh激活的回归头和增强正则化)
 ```
 
 ### 关键设置
@@ -96,15 +97,16 @@ EmotionAnalysisModel
 - **混合损失权重λ**：回归损失占比0.7（默认LAMBDA=0.7）
 - **学习率**：0.001（可通过--lr参数调整）
 - **模型选择策略**：基于R²指标选择最佳模型
+- **正则化设置**：Dropout=0.3，权重衰减=0.02
 
 ## 训练指南
 
 ### 快速开始
 
-使用R²策略运行训练：
+使用增强正则化策略运行训练：
 
 ```bash
-./run_r2_best_model.sh
+./run_with_regularization.sh
 ```
 
 ### 自定义训练
@@ -113,7 +115,7 @@ EmotionAnalysisModel
 
 ```bash
 # 编辑脚本中的参数
-nano run_r2_best_model.sh
+nano run_with_regularization.sh
 
 # 或手动运行训练脚本指定参数
 python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --lambda 0.7 --monitor r2
@@ -155,11 +157,17 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
    - 训练脚本已自动配置在screen会话中运行
    - 使用`screen -r SESSION_NAME`查看进度，Ctrl+A然后D分离会话
 
+6. **增强正则化策略**
+   - 使用Dropout=0.3抑制神经元的协同适应
+   - 权重衰减设为0.02减小权重幅度防止过拟合
+   - 多层Dropout应用在网络的不同层之间增强泛化能力
+   - 扩展网络结构增加非线性表达能力
+
 ## 项目结构
 
 ```
 .
-├── run_r2_best_model.sh         # R²策略训练脚本
+├── run_with_regularization.sh   # 增强正则化训练脚本
 ├── train_mixed.py               # 训练实现
 ├── README.md                    # 项目文档
 ├── requirements.txt             # 依赖列表
@@ -183,7 +191,8 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
 | LAMBDA_WEIGHT | 混合损失权重λ | 0.7 |
 | LEARNING_RATE | 初始学习率 | 0.001 |
 | HIDDEN_SIZE | 隐藏层大小 | 512 |
-| DROPOUT | Dropout率 | 0.1 |
+| DROPOUT | Dropout率 | 0.3 |
+| WEIGHT_DECAY | 权重衰减 | 0.02 |
 | TAU_MIN/TAU_MAX | 时间常数范围 | 1.0/20.0 |
 | EARLY_STOPPING_METRIC | 早停指标 | 'r2' |
 
@@ -209,6 +218,7 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
 - 使用更高的batch_size (256-512)可提高GPU利用率
 - 增加iterations_per_batch参数(50-200)可大幅提升训练效果
 - 使用线性学习率预热和衰减策略（已内置）
+- 增强的正则化设置可以显著提高模型泛化能力
 
 ## 训练结果与评估
 
