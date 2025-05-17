@@ -238,7 +238,6 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
 如有任何问题或建议，请通过以下方式联系开发团队：
 
 - 提交GitHub Issues
-- 邮件联系：[your-email@example.com]
 
 ## 许可
 
