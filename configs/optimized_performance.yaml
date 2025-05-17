@@ -1,0 +1,117 @@
+# LTC-NCP-VA 优化性能配置
+# 经过精细调优的超参数设置，旨在发挥模型最佳性能
+
+# 数据配置
+data:
+  train:
+    en: data/processed/eng_train.csv
+    zh: data/processed/chn_train.csv
+  val:
+    en: data/processed/eng_val.csv
+    zh: data/processed/chn_val.csv
+  test:
+    en: data/processed/eng_test.csv
+    zh: data/processed/chn_test.csv
+  text_col: "text"
+  v_col: "V"
+  a_col: "A"
+  meta_features:
+    - "text_length"
+    - "punct_density"
+    - "sentence_count"  # 增加句子数量作为额外特征
+  max_length: 120  # 增加最大长度以捕获更完整的情感表达
+  use_meta_features: true
+  oversample_extreme_valence: true  # 启用Valence极端值上采样
+  
+# 模型配置 - 优化架构参数
+model:
+  type: "ltc_ncp"
+  embedding_dim: 200  # 进一步增加嵌入维度
+  hidden_size: 180  # 增加隐藏层大小以匹配多层级设计
+  dropout: 0.3  # 保持中等dropout比率
+  sparsity_level: 0.3  # 降低稀疏度，增加连接密度
+  dt: 0.1  # 减小时间步长，增加精度
+  integration_method: "euler"  # 使用简单的欧拉方法，权衡计算速度与精度
+  bidirectional: true
+  # 新增NCP增强参数
+  wiring_type: "structured"  # 使用结构化连接模式
+  multi_level: true  # 启用多层级处理
+  emotion_focused: true  # 启用情感感知连接
+  heterogeneous: true  # 使用异构连接密度
+  # 新增Mini-Transformer参数
+  use_transformer: true  # 启用Mini-Transformer架构
+  transformer:
+    num_layers: 4    # 4层Transformer
+    num_heads: 4     # 4头自注意力
+    dim_feedforward: 512  # 前馈网络维度
+    dropout: 0.2     # Transformer专用dropout
+  
+# 训练配置 - 优化训练动态
+training:
+  epochs: 30  # 适当减少轮数，因为增强版模型收敛更快
+  batch_size: 32  # 保持批次大小
+  learning_rate: 0.001  # 轻微提高学习率，配合更复杂的架构
+  weight_decay: 0.0001  # 适度降低权重衰减
+  clip_grad_norm: 1.0  # 保持梯度裁剪阈值
+  scheduler:
+    type: "cosine"  # 使用余弦退火调度
+  optimizer: "adamw"
+  use_amp: true
+  seed: 42
+  patience: 10
+  freeze_embedding_epochs: 3
+  
+# 高级优化技术
+optimization:
+  label_smoothing: 0.05  # 保持标签平滑
+  mixup_alpha: 0.2  # 增加Mixup强度，鼓励更好的泛化
+  gradient_accumulation_steps: 2  # 保持梯度累积
+  freeze_embedding_epochs: 3  # 保持嵌入层冻结轮数
+  use_mse_ccc_loss: false  # 禁用MSE+CCC组合损失，只使用MSE
+  freeze_a_head_epochs: 3  # 前3轮冻结A头
+  
+# 评估配置
+evaluation:
+  metrics:
+    - "mse"
+    - "rmse"
+    - "mae"
+    - "ccc"  # 一致性相关系数
+    - "spearman"
+    - "pearson"  # 增加皮尔逊相关系数
+  best_metric: "rmse"  # 用于选择最佳模型的指标
+  higher_better: false
+  patience: 10  # 保持早停策略的耐心值
+  
+# 日志和存储
+logging:
+  log_dir: "runs"
+  log_every: 15
+  save_model: true
+  tensorboard: true
+  save_dir: "runs"
+  save_checkpoints: true  # 保存中间检查点
+  checkpoints_interval: 5  # 每隔多少轮保存一次检查点
+  log_interval: 10
+  
+# 多语言设置
+multilingual:
+  enabled: true
+  balance_languages: true  # 每个批次中中英文样本数量平衡
+  token_embedding_mode: "shared"  # 使用共享嵌入以增强跨语言知识迁移
+  language_specific_layers: false  # 不使用语言特定层
+
+# 硬件设置
+hardware:
+  device: "cuda" 
+  seed: 42
+  num_workers: 6  # 保持数据加载工作线程
+  precision: "mixed"  # 使用混合精度训练
+  
+# 可视化设置
+visualization:
+  enabled: true
+  n_samples: 150  # 保持可视化样本数量
+  output_dir: "results/plots"
+  confusion_matrix: true  # 生成情感区域混淆矩阵
+  attention_maps: true  # 可视化注意力 
