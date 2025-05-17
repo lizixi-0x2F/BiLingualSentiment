@@ -1,30 +1,3 @@
-# 模型检查点和导出文件
-checkpoints/
-*.pt
-*.pth
-*.onnx
-*.mlmodel
-*.bin
-*.h5
-model_exports/
-
-# 输出目录
-outputs/
-
-# 数据集文件 - 但保留示例数据
-*.csv
-!example_data/
-!example_data/*.csv
-
-# 图像和可视化
-*.png
-*.jpg
-*.jpeg
-*.gif
-chinese_font_test.png
-visualizations/
-!docs/images/
-
 # Python相关
 __pycache__/
 *.py[cod]
@@ -46,85 +19,70 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # 虚拟环境
-venv/
-env/
-ENV/
 .env
 .venv
-.venv/
 env/
+venv/
+ENV/
 env.bak/
 venv.bak/
 
-# Jupyter相关
-.ipynb_checkpoints
-*.ipynb
+# 模型检查点
+checkpoints/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
 
-# 日志和临时文件
+# 日志文件
 logs/
 *.log
-*.swp
-*.swo
-.DS_Store
-.nfs*
+training_*.log
+training_log.txt
+
+# 临时文件
+backup/
+.backup/
 tmp/
 temp/
-.~lock*
-~$*
+
+# 数据文件
+data/processed/
+data/raw/
+*.csv
+*.json
+*.pkl
+*.h5
+
+# 结果和输出
+results/
+output/
+*.png
+*.jpg
+*.jpeg
+*.pdf
 
 # IDE相关
 .idea/
 .vscode/
-*.sublime-project
-*.sublime-workspace
-.project
-.pydevproject
-.spyderproject
-.spyproject
-.ropeproject
-
-# 特定于项目的文件
-nohup.out
-*.bak
-runs/
-
-# 屏幕会话
-screenlog.*
-
-# 允许提交源代码和必要文件
-!train_mixed.py
-!run_mixed_train.sh
-!src/**
-!requirements.txt
-!README.md
-!example_texts.txt
-!Chinese_VA_dataset_gaussNoise.csv
-!emobank_va_normalized.csv
-
-# Model files
-model_dir/
-coreml_model/
-*.mlmodel
-*.mlpackage
-
-# Data
-training_log*.txt
-results/
-
-# macOS
-.AppleDouble
-.LSOverride
-._*
-
-# IDE
 *.swp
 *.swo
 
-# Environment
-.env
-.venv
-env/
-venv/
-ENV/ 
+# 系统文件
+.DS_Store
+.ipynb_checkpoints
+Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# 项目特定
+nohup.out
+*.bak
+calibrate.py
+*_error.log

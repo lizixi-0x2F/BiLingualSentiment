@@ -1,5 +1,6 @@
 # LTC-NCP-VA 价值增强配置
 # 经过调整的超参数设置，重点优化价值(Valence)预测
+# 新增：FGM对抗训练、边界样本权重、VA多任务联合优化
 
 # 数据配置
 data:
@@ -14,15 +15,20 @@ data:
     - "sentence_count"  # 增加句子数量作为额外特征
   max_length: 150  # 适当增加最大长度以捕获更完整的情感表达
   use_meta_features: true
-  oversample_extreme_valence: true  # 加强上采样极端V值样本
+  # 新增词性特征配置
+  use_pos_features: true   # 启用词性特征增强Valence判断
+  pos_features_count: 15   # 词性特征向量维度，与pos_features.py中保持一致
+  oversample_extreme_valence: false  # 禁用传统上采样方法
+  oversample_quadrants: false        # 禁用传统上采样方法
+  use_weighted_sampler: true         # 启用加权随机采样器，替代传统上采样
   analyze_before_training: false     # 禁用训练前数据分析
   confirm_training: false            # 不询问确认，强制继续
   
-# 模型配置 - 优化针对valence的架构参数
+# 模型配置 - 优化针对valence的架构参数 - 增大参数量至约5百万
 model:
   type: "ltc_ncp"
-  embedding_dim: 256  # 嵌入维度
-  hidden_size: 128    # 减小隐藏层大小以避免维度过大问题
+  embedding_dim: 384  # 嵌入维度增加
+  hidden_size: 256    # 增加隐藏层大小
   dropout: 0.25  # 稍微降低dropout以减少过拟合风险并保留更多信息
   sparsity_level: 0.25  # 降低稀疏度，增加连接密度，提高表达能力
   dt: 0.08  # 减小时间步长，增加精度
@@ -31,26 +37,31 @@ model:
   # 新增价值增强参数
   enhance_valence: true  # 启用价值预测增强
   valence_layers: 2      # 价值分支使用2个额外层
+  # 新增词性特征增强参数
+  pos_features_count: 15  # 词性特征维度
   # 新增NCP增强参数
   wiring_type: "structured"  # 使用结构化连接模式
   multi_level: true  # 启用多层次LTC结构
   emotion_focused: true  # 启用情感感知连接
   heterogeneous: true  # 使用异构连接密度
-  # 新增Mini-Transformer参数
+  # 新增Mini-Transformer参数 - 增加容量
   use_transformer: true  # 启用Mini-Transformer架构
   transformer:
-    num_layers: 4    # 减少层数以避免维度过大问题
-    num_heads: 4     # 减少头数
-    dim_feedforward: 512  # 减小前馈网络维度
+    num_layers: 6    # 增加层数
+    num_heads: 6     # 增加注意力头数
+    dim_feedforward: 1024  # 增加前馈网络维度
     dropout: 0.2     # Transformer专用dropout
   # 情感轴反转设置
-  invert_valence: false
+  invert_valence: true   # 启用价值轴反转，解决正负情感识别反转问题
   invert_arousal: false
+  # 四象限分类设置
+  use_quadrant_head: true   # 启用四象限分类辅助任务头
+  quadrant_weight: 0.5      # 增加四象限分类损失权重，更强调象限正确性
   
 # 训练配置 - 优化训练动态
 training:
-  epochs: 50  # 增加轮数以便更充分训练
-  batch_size: 24  # 降低批次大小，提高泛化能力
+  epochs: 50  # 确保训练50轮
+  batch_size: 20  # 略微降低批次大小，适应更大的模型
   learning_rate: 0.0008  # 降低学习率以获得更稳定的收敛
   weight_decay: 0.00005  # 适度增加权重衰减以减少过拟合
   clip_grad_norm: 1.0  # 保持梯度裁剪阈值
@@ -71,14 +82,25 @@ optimization:
   freeze_embedding_epochs: 0  # 不冻结嵌入层
   use_mse_ccc_loss: false
   freeze_a_head_epochs: 8  # 前8轮冻结A头，强制模型先学习valence
+  # 新增：对抗训练配置
+  use_adversarial: true     # 启用FGM对抗训练
+  adversarial_epsilon: 0.6  # FGM扰动大小，适度增大可提高鲁棒性
+  adversarial_emb_name: "embedding"  # 添加扰动的层名称
+  use_fgsm: true           # 使用FGSM而非FGM（使用梯度符号）
+  # 新增：边界样本权重配置
+  use_boundary_weights: true         # 启用边界样本权重
+  boundary_threshold: 0.15           # 边界区域阈值
+  boundary_weight_multiplier: 2.5    # 边界样本权重倍增
   
 # 损失函数设置
 loss:
   mse_weight: 1.0
   ccc_weight: 0.3  # 增加CCC权重以提高一致性
   use_direction_loss: true   # 启用情感方向感知损失
-  direction_weight: 1.2      # 增加方向损失权重，更强调象限正确性
-  valence_weight: 2.0        # 显著增加价值损失权重
+  direction_weight: 2.0      # 大幅增加方向损失权重，强制模型更关注象限正确性
+  valence_weight: 2.5        # 进一步增加价值维度权重，纠正价值方向识别
+  # 新增：符号损失权重（用于四象限分类损失）
+  sign_weight: 0.2           # 符号损失权重
 
 # 评估配置
 evaluation:
@@ -95,11 +117,11 @@ evaluation:
   
 # 日志和存储
 logging:
-  log_dir: "runs/valence_enhanced"
+  log_dir: "runs/valence_enhanced_5m"
   log_every: 10
   save_model: true
   tensorboard: true
-  save_dir: "runs/valence_enhanced"
+  save_dir: "runs/valence_enhanced_5m"
   save_checkpoints: true
   checkpoints_interval: 5
   log_interval: 10
@@ -115,9 +137,9 @@ hardware:
 visualization:
   enabled: true
   n_samples: 200  # 增加可视化样本数量
-  output_dir: "results/plots/valence_enhanced"
+  output_dir: "results/plots/valence_enhanced_5m"
   confusion_matrix: true
   attention_maps: true
 
 # 输出目录设置
-output_dir: "results/valence_enhanced" 
+output_dir: "results/valence_enhanced_5m" 
