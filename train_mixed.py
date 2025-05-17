@@ -84,17 +84,6 @@ class EarlyStopping:
                 
         return self.early_stop
 
-def save_transformer_weights(model, output_path):
-    """保存模型的Transformer权重"""
-    try:
-        # 获取模型的encoder部分
-        encoder_weights = model.text_encoder.state_dict()
-        # 保存权重
-        torch.save(encoder_weights, output_path)
-        logger.info(f"Transformer权重已保存至: {output_path}")
-    except Exception as e:
-        logger.error(f"保存Transformer权重时出错: {e}")
-
 def train(config, output_dir=None, iterations_per_batch=50):
     # 设置设备
     device = torch.device(config.DEVICE if torch.cuda.is_available() or hasattr(torch.backends, "mps") 
@@ -243,9 +232,6 @@ def train(config, output_dir=None, iterations_per_batch=50):
         json.dump(config_dict, f, indent=4)
     
     print(f"✓ 配置已保存至: {config_path}")
-    
-    # 保存模型架构
-    save_transformer_weights(model, os.path.join(output_dir, "transformer_weights.pth"))
     
     # 加载最佳模型进行测试
     try:
