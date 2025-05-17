@@ -1,42 +1,32 @@
-# 中英文混合情感分析模型（NCP-LTC）
+# 中英文混合情感分析模型（Pre-trained Transformer Based）
 
-基于神经回路策略(NCP)和液体时间常数网络(LTC)的情感分析模型，用于预测文本的效价(Valence)和唤醒度(Arousal)值。
+基于预训练Transformer模型的情感分析系统，用于预测中英文文本的效价(Valence)和唤醒度(Arousal)值。
 
 ## 项目概述
 
-本项目实现了一个创新的情感分析系统，基于神经回路策略(NCP)与液体时间常数网络(LTC)，使用轻量级文本编码器处理文本。系统可以同时分析中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
+本项目实现了一个高效的双语情感分析系统，基于预训练的Transformer模型（DistilBERT和XLM-RoBERTa），可同时处理中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
 
 ### 主要特点
 
 - **双语支持**：同时支持中文和英文情感分析，使用混合数据集训练
-- **高精度**：通过NCP-LTC创新架构提高预测精度，R²分数可达0.6+
-- **高效训练**：支持批次内多次迭代，显著提升模型性能
-- **稳定性强**：采用Xavier×2初始化和tanh激活函数，确保模型稳定收敛
-- **资源友好**：相比大型预训练模型，内存和计算需求更低
-- **R²优化策略**：使用R²指标选择最佳模型，提升模型性能
-- **增强正则化**：使用多层Dropout和更高的权重衰减，提高泛化能力
+- **高精度**：利用预训练语言模型的强大表示能力，R²分数优于传统方法
+- **便捷微调**：支持对预训练模型进行高效微调，适应不同领域的情感分析需求
+- **转移学习**：利用预训练模型的语言知识降低对标注数据的依赖
+- **灵活部署**：支持多种预训练模型选择，适应不同资源限制和精度需求
+- **高效训练**：支持模型层冻结、学习率预热和衰减等优化策略
+- **通用接口**：提供统一的数据处理和模型接口，便于扩展支持更多模型
 
-### 技术亮点
+### 支持的模型
 
-1. **神经回路策略(NCP)**
-   - 15%稀疏连接，模拟生物神经网络结构
-   - 使用Xavier×2初始化确保前几十步就有有效信号传递
-   - 激励/抑制神经元分离（60%/40%比例）
+1. **DistilBERT多语言版**
+   - 轻量级预训练模型，支持多种语言
+   - 相比原始BERT模型体积减少40%，推理速度提升60%
+   - 保持较高的多语言理解能力
 
-2. **液体时间常数网络(LTC)**
-   - 可学习的时间常数(τ)，适应不同的时间尺度
-   - 连续时间动力学处理序列信息
-   - 时间常数正则化防止梯度消失/爆炸
-
-3. **混合训练策略**
-   - λ权重控制回归损失与生成损失的比例
-   - 标签数据归一化到[-1, 1]范围
-   - 回归头使用tanh()激活函数确保输出范围
-
-4. **R²最佳模型策略**
-   - 使用R²（确定系数）而非损失值选择最佳模型
-   - 优化模型对数据变异性的解释能力
-   - 更好地捕捉情感维度的趋势和变化
+2. **XLM-RoBERTa**
+   - 在100种语言上预训练的强大模型
+   - 优秀的跨语言转移能力
+   - 处理多语言文本时表现更佳
 
 ## 环境要求
 
@@ -72,41 +62,56 @@ pip install -r requirements.txt
 ### 数据预处理
 
 训练过程中会自动进行以下预处理：
-- 文本分词和序列化
-- 标签归一化至[-1, 1]范围（使用MinMaxScaler）
+- 使用预训练模型的tokenizer进行分词
+- 自动处理中英文文本，无需手动区分
+- 标签归一化至[-1, 1]范围
 - 训练/验证/测试集划分（比例可在配置中调整）
 
 ## 模型架构
 
-本项目实现了一个基于NCP-LTC的情感分析模型，主要组件包括：
+本项目实现了基于预训练模型的情感分析架构，主要组件包括：
 
 ```
-EmotionAnalysisModel
-├── LightweightTextEncoder (文本编码)
-├── InputMapping (输入映射)
-├── NCP_LTC Layer (神经动力学处理)
-│   ├── NCPAttention (神经回路注意力)
-│   └── NCP_LNN (液体神经网络)
-└── OutputLayer (带tanh激活的回归头和增强正则化)
+PretrainedSentimentModel
+├── Transformer Encoder (DistilBERT/XLM-RoBERTa)
+│   ├── 预训练词嵌入层
+│   ├── 多层Transformer块
+│   └── 上下文化表示
+├── Pooling Strategy (CLS/Mean)
+│   └── 序列表示提取
+└── Regression Head
+    ├── 多层全连接网络
+    ├── GELU激活和Dropout
+    └── Tanh输出层（保证[-1,1]范围）
 ```
 
-### 关键设置
+### 关键设计
 
-- **NCP稀疏度**：15%连接率（默认设置为Config.SPARSITY=0.15）
-- **权重初始化**：Xavier初始化（gain=2.0）
-- **混合损失权重λ**：回归损失占比0.7（默认LAMBDA=0.7）
-- **学习率**：0.001（可通过--lr参数调整）
-- **模型选择策略**：基于R²指标选择最佳模型
-- **正则化设置**：Dropout=0.3，权重衰减=0.02
+1. **模型选择灵活性**
+   - 支持在DistilBERT和XLM-RoBERTa间切换
+   - 适应不同资源限制和精度需求
+
+2. **微调策略**
+   - 冻结底层网络提高训练效率
+   - 较小的学习率(2e-5)适合微调
+
+3. **表示优化**
+   - 支持CLS标记和平均池化两种策略
+   - 多层回归头增强特征提取能力
+
+4. **正则化技术**
+   - 梯度裁剪防止梯度爆炸
+   - Dropout和权重衰减减少过拟合
+   - 学习率预热和衰减优化训练过程
 
 ## 训练指南
 
 ### 快速开始
 
-使用增强正则化策略运行训练：
+运行预训练模型训练脚本：
 
 ```bash
-./run_with_regularization.sh
+./run_train.sh
 ```
 
 ### 自定义训练
@@ -115,114 +120,110 @@ EmotionAnalysisModel
 
 ```bash
 # 编辑脚本中的参数
-nano run_with_regularization.sh
+notepad run_train.sh
 
 # 或手动运行训练脚本指定参数
-python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --lambda 0.7 --monitor r2
+python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type distilbert --monitor r2
 ```
 
 ### 参数说明
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--device` | 计算设备(cuda/cpu) | cuda |
-| `--batch_size` | 批处理大小 | 128 |
+| `--device` | 计算设备(cuda/cpu/mps) | cuda |
+| `--batch_size` | 批处理大小 | 32 |
 | `--epochs` | 训练轮次 | 20 |
+| `--lr` | 学习率 | 2e-5 |
+| `--weight_decay` | 权重衰减 | 0.01 |
 | `--monitor` | 早停监控指标(val_loss/r2/rmse/ccc) | r2 |
-| `--patience` | 早停耐心值 | 5 |
-| `--lr` | 学习率 | 0.001 |
-| `--lambda` | 混合损失权重λ(回归损失占比) | 0.7 |
+| `--patience` | 早停耐心值 | 3 |
+| `--model_type` | 模型类型(distilbert/xlm-roberta) | distilbert |
 | `--output_dir` | 输出目录 | 自动生成 |
 
 ### 训练技巧
 
-1. **R²最佳模型策略**
-   - 使用R²而非损失值选择模型可提高回归性能
-   - R²考虑数据变异解释能力，比单纯损失值更适合情感回归任务
-   - 结合早停机制，在R²不再提升时停止训练
+1. **模型选择**
+   - `distilbert`: 适合资源有限情况，训练和推理更快
+   - `xlm-roberta`: 适合需要更高准确度的情况，特别是在多语言场景
 
-2. **稀疏连接和权重初始化**
-   - 15%的稀疏连接搭配Xavier×2初始化（gain=2.0）能让模型在前几十步就有效信号传递
-   - 如果训练不稳定，可尝试调整SPARSITY值（0.1~0.2之间）
+2. **学习率调整**
+   - 对于预训练模型，推荐使用较小的学习率(1e-5 ~ 5e-5)
+   - 系统内置学习率预热和衰减调度器
 
-3. **学习率调整**
-   - 初始训练使用0.001，微调降至0.0003
-   - 如果loss出现NaN，系统会自动降低学习率并重新加载最佳模型
+3. **层冻结策略**
+   - 通过修改`config.py`中的`FREEZE_LAYERS`参数可以调整冻结底层数量
+   - 冻结更多层可以加快训练，但可能略微降低性能
 
-4. **混合损失权重**
-   - λ参数控制回归损失与生成损失比例
-   - 0.7是推荐值，确保回归loss占主导地位
+4. **池化策略**
+   - `cls`: 使用[CLS]标记作为序列表示，适合分类任务
+   - `mean`: 使用平均池化，有时可以提供更好的表示
 
-5. **在Screen中运行**
-   - 训练脚本已自动配置在screen会话中运行
-   - 使用`screen -r SESSION_NAME`查看进度，Ctrl+A然后D分离会话
-
-6. **增强正则化策略**
-   - 使用Dropout=0.3抑制神经元的协同适应
-   - 权重衰减设为0.02减小权重幅度防止过拟合
-   - 多层Dropout应用在网络的不同层之间增强泛化能力
-   - 扩展网络结构增加非线性表达能力
+5. **批量大小**
+   - 根据GPU显存调整批量大小，推荐16-64之间
+   - 太小的批量可能导致训练不稳定，太大的批量可能降低泛化能力
 
 ## 项目结构
 
 ```
 .
-├── run_with_regularization.sh   # 增强正则化训练脚本
-├── train_mixed.py               # 训练实现
-├── README.md                    # 项目文档
-├── requirements.txt             # 依赖列表
+├── run_train.sh               # 训练脚本
+├── train.py                   # 训练实现
+├── README.md                  # 项目文档
+├── requirements.txt           # 依赖列表
 ├── Chinese_VA_dataset_gaussNoise.csv  # 中文情感数据集
-├── emobank_va_normalized.csv    # 英文情感数据集
-└── src/                         # 源代码
-    ├── config.py                # 配置参数
-    ├── models/                  # 模型定义
-    │   ├── emotion_model.py     # 情感分析模型
-    │   └── text_encoder.py      # 文本编码器
-    └── utils/                   # 工具函数
-        ├── data_utils.py        # 数据处理
-        └── train_utils.py       # 训练工具
+├── emobank_va_normalized.csv  # 英文情感数据集
+└── src/                       # 源代码
+    ├── config.py              # 配置参数
+    ├── inference.py           # 推理脚本
+    ├── models/                # 模型定义
+    │   └── roberta_model.py   # 预训练模型实现
+    └── utils/                 # 工具函数
+        ├── data_utils.py      # 数据处理
+        └── train_utils.py     # 训练工具
 ```
 
 ## 关键配置参数
 
 | 参数 | 说明 | 推荐值 |
 |------|------|--------|
-| SPARSITY | NCP稀疏连接度 | 0.15 |
-| LAMBDA_WEIGHT | 混合损失权重λ | 0.7 |
-| LEARNING_RATE | 初始学习率 | 0.001 |
-| HIDDEN_SIZE | 隐藏层大小 | 512 |
+| MODEL_TYPE | 模型类型 | 'distilbert'或'xlm-roberta' |
+| MULTILINGUAL_MODEL_NAME | 预训练模型名称 | 'distilbert-base-multilingual-cased' |
+| POOLING_TYPE | 池化策略 | 'cls'或'mean' |
+| FREEZE_LAYERS | 冻结层数量 | 4 |
+| LEARNING_RATE | 学习率 | 2e-5 |
+| BATCH_SIZE | 批量大小 | 32 |
 | DROPOUT | Dropout率 | 0.3 |
-| WEIGHT_DECAY | 权重衰减 | 0.02 |
-| TAU_MIN/TAU_MAX | 时间常数范围 | 1.0/20.0 |
+| WEIGHT_DECAY | 权重衰减 | 0.01 |
 | EARLY_STOPPING_METRIC | 早停指标 | 'r2' |
+| WARMUP_RATIO | 预热步数比例 | 0.1 |
 
-## 排错与优化
+## 推理使用
 
-### 常见问题解决
+训练完成后，可以使用`src/inference.py`脚本进行推理：
 
-1. **训练不稳定**
-   - 检查标签是否已归一化到[-1, 1]范围
-   - 确认回归头使用了tanh()激活函数
-   - 调整λ值增加回归损失占比(推荐0.7)
+```bash
+python src/inference.py `
+    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_type distilbert `
+    --device cuda `
+    --text "这是一个测试文本，我感到非常开心！" `
+    --debug
+```
 
-2. **NCP信号传递慢**
-   - 在稀疏15%的NCP连接中，需要使用Xavier×2初始化
-   - 默认1e-3随机权重太小，gain=2.0可让前几十step产生有效信号
+或批量推理文本文件：
 
-3. **内存不足错误**
-   - 减小batch_size (32-64)
-   - 减少NCP_LNN中的hidden_size
+```bash
+python src/inference.py `
+    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_type distilbert `
+    --device cuda `
+    --input_file example_texts.txt `
+    --output_file predictions.csv
+```
 
-### 性能优化
+## 评估与性能
 
-- 使用更高的batch_size (256-512)可提高GPU利用率
-- 增加iterations_per_batch参数(50-200)可大幅提升训练效果
-- 使用线性学习率预热和衰减策略（已内置）
-- 增强的正则化设置可以显著提高模型泛化能力
-
-## 训练结果与评估
-
-训练完成后，系统会自动生成以下输出：
+训练完成后，系统会自动在测试集上进行评估并生成以下输出：
 
 - **best_model.pth**：性能最佳的模型权重（基于R²指标）
 - **metrics_epoch_*.json**：每个epoch的详细评估指标
@@ -234,7 +235,31 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
 - **RMSE**：均方根误差，越小越好
 - **CCC**：一致性相关系数，衡量预测与真实值的一致性
 
-## 案例与应用
+## 排错与优化
+
+### 常见问题解决
+
+1. **训练不稳定**
+   - 检查是否使用了适合预训练模型的较小学习率(2e-5左右)
+   - 确认回归头使用了tanh()激活函数确保输出在[-1,1]范围内
+   - 尝试减小batch_size或增加梯度裁剪值
+
+2. **内存不足错误**
+   - 减小batch_size (8-16)
+   - 增加FREEZE_LAYERS冻结更多Transformer层
+   - 使用distilbert等较小的模型
+
+3. **GPU/CPU切换**
+   - 模型会自动根据可用设备选择
+   - 对于CPU训练，建议使用较小的batch_size
+
+### 性能优化
+
+- 使用混合精度训练可大幅降低内存需求，提高训练速度
+- 学习率预热和衰减策略已内置，可提升训练稳定性
+- 使用CLS池化通常比平均池化需要的计算资源更少
+
+## 应用场景
 
 通过该模型，您可以分析文本的情感极性(效价)和情感强度(唤醒度)，应用于：
 
@@ -242,6 +267,7 @@ python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --la
 - 客户反馈分析
 - 心理健康文本分析
 - 内容推荐系统
+- 跨语言情感分析
 
 ## 开发者
 

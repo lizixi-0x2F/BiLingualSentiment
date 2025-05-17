@@ -16,6 +16,13 @@ class Config:
     NUM_HEADS = 8   # 注意力头数量
     TRANSFORMER_HIDDEN_SIZE = 256  # 隐藏层大小
     
+    # 预训练模型配置
+    MODEL_TYPE = 'ncp_lnn'  # 可选: 'ncp_lnn', 'distilbert', 'xlm-roberta'
+    MULTILINGUAL_MODEL_NAME = 'distilbert-base-multilingual-cased'  # 多语言DistilBERT模型
+    # MULTILINGUAL_MODEL_NAME = 'xlm-roberta-base'  # 另一选项：XLM-RoBERTa
+    POOLING_TYPE = 'cls'  # 池化类型: 'cls' 或 'mean'
+    FREEZE_LAYERS = 4  # 冻结底层数量，加快训练速度
+    
     # NCP_LNN配置
     EXCITATORY_RATIO = 0.6  # 激励神经元比例
     SPARSITY = 0.15  # 连接稀疏度，降低至15%使Xavier×2能让前几十step就有效信号
