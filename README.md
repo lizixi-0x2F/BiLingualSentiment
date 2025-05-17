@@ -13,6 +13,7 @@
 - **高效训练**：支持批次内多次迭代，显著提升模型性能
 - **稳定性强**：采用Xavier×2初始化和tanh激活函数，确保模型稳定收敛
 - **资源友好**：相比大型预训练模型，内存和计算需求更低
+- **R²优化策略**：使用R²指标选择最佳模型，提升模型性能
 
 ### 技术亮点
 
@@ -30,6 +31,11 @@
    - λ权重控制回归损失与生成损失的比例
    - 标签数据归一化到[-1, 1]范围
    - 回归头使用tanh()激活函数确保输出范围
+
+4. **R²最佳模型策略**
+   - 使用R²（确定系数）而非损失值选择最佳模型
+   - 优化模型对数据变异性的解释能力
+   - 更好地捕捉情感维度的趋势和变化
 
 ## 环境要求
 
@@ -88,24 +94,29 @@ EmotionAnalysisModel
 - **NCP稀疏度**：15%连接率（默认设置为Config.SPARSITY=0.15）
 - **权重初始化**：Xavier初始化（gain=2.0）
 - **混合损失权重λ**：回归损失占比0.7（默认LAMBDA=0.7）
-- **学习率**：0.0003（可通过--lr参数调整）
+- **学习率**：0.001（可通过--lr参数调整）
+- **模型选择策略**：基于R²指标选择最佳模型
 
 ## 训练指南
 
 ### 快速开始
 
-使用默认参数运行训练：
+使用R²策略运行训练：
 
 ```bash
-./run_mixed_train.sh
+./run_r2_best_model.sh
 ```
 
 ### 自定义训练
 
-可通过传递参数自定义训练过程：
+可通过编辑脚本或传递参数自定义训练过程：
 
 ```bash
-./run_mixed_train.sh --device cuda --batch_size 64 --epochs 30 --lr 0.0003 --lambda 0.7
+# 编辑脚本中的参数
+nano run_r2_best_model.sh
+
+# 或手动运行训练脚本指定参数
+python train_mixed.py --device cuda --batch_size 128 --epochs 20 --lr 0.001 --lambda 0.7 --monitor r2
 ```
 
 ### 参数说明
@@ -117,36 +128,38 @@ EmotionAnalysisModel
 | `--epochs` | 训练轮次 | 20 |
 | `--monitor` | 早停监控指标(val_loss/r2/rmse/ccc) | r2 |
 | `--patience` | 早停耐心值 | 5 |
-| `--lr` | 学习率 | 0.0003 |
+| `--lr` | 学习率 | 0.001 |
 | `--lambda` | 混合损失权重λ(回归损失占比) | 0.7 |
 | `--output_dir` | 输出目录 | 自动生成 |
 
 ### 训练技巧
 
-1. **稀疏连接和权重初始化**
+1. **R²最佳模型策略**
+   - 使用R²而非损失值选择模型可提高回归性能
+   - R²考虑数据变异解释能力，比单纯损失值更适合情感回归任务
+   - 结合早停机制，在R²不再提升时停止训练
+
+2. **稀疏连接和权重初始化**
    - 15%的稀疏连接搭配Xavier×2初始化（gain=2.0）能让模型在前几十步就有效信号传递
    - 如果训练不稳定，可尝试调整SPARSITY值（0.1~0.2之间）
 
-2. **学习率调整**
+3. **学习率调整**
    - 初始训练使用0.001，微调降至0.0003
    - 如果loss出现NaN，系统会自动降低学习率并重新加载最佳模型
 
-3. **混合损失权重**
+4. **混合损失权重**
    - λ参数控制回归损失与生成损失比例
    - 0.7是推荐值，确保回归loss占主导地位
 
-4. **在Screen中运行**
-   - 使用screen会话可以在后台运行训练：
-     ```bash
-     screen -S ml_training -dm bash -c "cd /path/to/project && ./run_mixed_train.sh; exec bash"
-     ```
-   - 使用`screen -r ml_training`查看进度，Ctrl+A然后D分离会话
+5. **在Screen中运行**
+   - 训练脚本已自动配置在screen会话中运行
+   - 使用`screen -r SESSION_NAME`查看进度，Ctrl+A然后D分离会话
 
 ## 项目结构
 
 ```
 .
-├── run_mixed_train.sh           # 主训练脚本
+├── run_r2_best_model.sh         # R²策略训练脚本
 ├── train_mixed.py               # 训练实现
 ├── README.md                    # 项目文档
 ├── requirements.txt             # 依赖列表
@@ -168,10 +181,11 @@ EmotionAnalysisModel
 |------|------|--------|
 | SPARSITY | NCP稀疏连接度 | 0.15 |
 | LAMBDA_WEIGHT | 混合损失权重λ | 0.7 |
-| LEARNING_RATE | 初始学习率 | 0.0003 |
+| LEARNING_RATE | 初始学习率 | 0.001 |
 | HIDDEN_SIZE | 隐藏层大小 | 512 |
 | DROPOUT | Dropout率 | 0.1 |
 | TAU_MIN/TAU_MAX | 时间常数范围 | 1.0/20.0 |
+| EARLY_STOPPING_METRIC | 早停指标 | 'r2' |
 
 ## 排错与优化
 
@@ -200,7 +214,7 @@ EmotionAnalysisModel
 
 训练完成后，系统会自动生成以下输出：
 
-- **best_model.pth**：性能最佳的模型权重
+- **best_model.pth**：性能最佳的模型权重（基于R²指标）
 - **metrics_epoch_*.json**：每个epoch的详细评估指标
 - **training.log**：训练过程日志
 

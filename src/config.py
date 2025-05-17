@@ -38,7 +38,7 @@ class Config:
     
     # 早停配置
     PATIENCE = 5        # 早停耐心值
-    EARLY_STOPPING_METRIC = 'val_loss'  # 早停监控指标，可选 'val_loss', 'r2', 'rmse', 'ccc'
+    EARLY_STOPPING_METRIC = 'r2'  # 早停监控指标，可选 'val_loss', 'r2', 'rmse', 'ccc'
     EARLY_STOPPING_MIN_DELTA = 0.001    # 早停最小变化阈值
     
     # 输出配置
