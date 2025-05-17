@@ -85,33 +85,30 @@ class EarlyStopping:
         return self.early_stop
 
 def save_transformer_weights(model, output_path):
-    # 使用模型的接口获取Transformer权重
-    transfer_state_dict = model.get_transformer_weights()
-    
-    # 保存权重
-    torch.save(transfer_state_dict, output_path)
-    print(f"✓ 模型权重已保存至: {output_path}")
+    """保存模型的Transformer权重"""
+    try:
+        # 获取模型的encoder部分
+        encoder_weights = model.text_encoder.state_dict()
+        # 保存权重
+        torch.save(encoder_weights, output_path)
+        logger.info(f"Transformer权重已保存至: {output_path}")
+    except Exception as e:
+        logger.error(f"保存Transformer权重时出错: {e}")
 
 def train(config, output_dir=None, iterations_per_batch=50):
     # 设置设备
     device = torch.device(config.DEVICE if torch.cuda.is_available() or hasattr(torch.backends, "mps") 
-                         and torch.backends.mps.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
+                         and config.DEVICE == "mps" and torch.backends.mps.is_available() else "cpu")
     
-    # 设置输出目录
+    # 配置输出目录
     if output_dir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = os.path.join("outputs", f"combined_model_{timestamp}")
-    else:
-        output_dir = config.OUTPUT_DIR
+        output_dir = os.path.join(config.OUTPUT_DIR, timestamp)
+    
     os.makedirs(output_dir, exist_ok=True)
+    logger.info(f"输出将保存到: {output_dir}")
     
-    # 配置日志文件
-    file_handler = logging.FileHandler(os.path.join(output_dir, 'training.log'))
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
-    
-    # 准备数据
+    # 数据准备
     train_loader, val_loader, test_loader, tokenizer = prepare_dataloaders(config)
     print(f"数据集: 训练={len(train_loader.dataset)}, 验证={len(val_loader.dataset)}, 测试={len(test_loader.dataset)}")
     
@@ -206,7 +203,8 @@ def train(config, output_dir=None, iterations_per_batch=50):
             current_metric = val_metrics['rmse']
             is_better = current_metric < best_metric_value
         elif config.EARLY_STOPPING_METRIC == 'ccc':
-            current_metric = 1 - val_metrics.get('r2', 0) if 'ccc' not in val_metrics else val_metrics['ccc']
+            # 修复：直接使用r2值，不再取相反数
+            current_metric = val_metrics.get('r2', 0) if 'ccc' not in val_metrics else val_metrics['ccc']
             is_better = current_metric > best_metric_value
         else:
             # 默认使用验证损失
