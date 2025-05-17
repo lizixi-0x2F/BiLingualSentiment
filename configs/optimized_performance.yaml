@@ -3,15 +3,8 @@
 
 # 数据配置
 data:
-  train:
-    en: data/processed/eng_train.csv
-    zh: data/processed/chn_train.csv
-  val:
-    en: data/processed/eng_val.csv
-    zh: data/processed/chn_val.csv
-  test:
-    en: data/processed/eng_test.csv
-    zh: data/processed/chn_test.csv
+  train_path: "data/processed_clean/merged_train_clean.csv"
+  val_path: "data/processed_clean/merged_val_clean.csv"
   text_col: "text"
   v_col: "V"
   a_col: "A"
@@ -22,6 +15,8 @@ data:
   max_length: 120  # 增加最大长度以捕获更完整的情感表达
   use_meta_features: true
   oversample_extreme_valence: true  # 启用Valence极端值上采样
+  analyze_before_training: false      # 禁用训练前数据分析
+  confirm_training: false             # 不询问确认，强制继续
   
 # 模型配置 - 优化架构参数
 model:
@@ -45,6 +40,9 @@ model:
     num_heads: 4     # 4头自注意力
     dim_feedforward: 512  # 前馈网络维度
     dropout: 0.2     # Transformer专用dropout
+  # 情感轴反转设置
+  invert_valence: false     # 数据已清洗，不需要反转
+  invert_arousal: false
   
 # 训练配置 - 优化训练动态
 training:
@@ -96,7 +94,7 @@ logging:
   
 # 多语言设置
 multilingual:
-  enabled: true
+  enabled: false
   balance_languages: true  # 每个批次中中英文样本数量平衡
   token_embedding_mode: "shared"  # 使用共享嵌入以增强跨语言知识迁移
   language_specific_layers: false  # 不使用语言特定层
@@ -114,4 +112,14 @@ visualization:
   n_samples: 150  # 保持可视化样本数量
   output_dir: "results/plots"
   confusion_matrix: true  # 生成情感区域混淆矩阵
-  attention_maps: true  # 可视化注意力 
+  attention_maps: true  # 可视化注意力
+
+# 损失函数设置
+loss:
+  mse_weight: 1.0
+  ccc_weight: 0.2
+  use_direction_loss: true   # 启用情感方向感知损失
+  direction_weight: 0.5      # 方向损失权重
+
+# 输出目录设置
+output_dir: "results" 

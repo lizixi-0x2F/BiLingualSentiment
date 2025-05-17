@@ -16,8 +16,8 @@ from typing import Dict, Tuple, Optional, List, Union
 from .cells import LTCCell
 from .wiring import NCPWiring, MultiLevelNCPWiring
 
-# 全局调试标志，设为False禁用调试输出
-DEBUG = False
+# 全局调试标志，设为True启用调试输出
+DEBUG = True
 
 def debug_print(*args, **kwargs):
     """仅在DEBUG为True时输出信息"""
@@ -222,8 +222,8 @@ class MiniTransformer(nn.Module):
 
 class LTC_NCP_RNN(nn.Module):
     """
-    结合液态时间常数单元和神经电路策略的RNN模型
-    用于情感价效度回归任务
+    液态时间常数-神经电路策略-情感价效度模型
+    用于文本情感价效度回归，支持双语输入
     """
     
     def __init__(self, 
@@ -242,7 +242,12 @@ class LTC_NCP_RNN(nn.Module):
                 multi_level: bool = True,         # 新增：是否使用多层次连接
                 emotion_focused: bool = True,     # 新增：情感感知连接
                 heterogeneous: bool = True,       # 新增：异构连接密度
-                use_transformer: bool = False):   # 新增：是否使用Transformer
+                use_transformer: bool = False,    # 新增：是否使用Transformer
+                invert_valence: bool = False,     # 新增：是否反转价值预测
+                invert_arousal: bool = False,     # 新增：是否反转效度预测
+                enhance_valence: bool = False,    # 新增：是否增强价值预测能力
+                valence_layers: int = 2           # 新增：价值分支的额外层数
+               ):
         """
         初始化增强版LTC-NCP-RNN模型
         
@@ -263,6 +268,10 @@ class LTC_NCP_RNN(nn.Module):
             emotion_focused: 是否使用情感感知连接
             heterogeneous: 是否使用异构连接密度
             use_transformer: 是否使用Transformer增强特征
+            invert_valence: 是否反转价值预测
+            invert_arousal: 是否反转效度预测
+            enhance_valence: 是否增强价值预测能力
+            valence_layers: 价值分支的额外层数
         """
         super(LTC_NCP_RNN, self).__init__()
         
@@ -281,6 +290,10 @@ class LTC_NCP_RNN(nn.Module):
         self.emotion_focused = emotion_focused
         self.heterogeneous = heterogeneous
         self.use_transformer = use_transformer
+        self.invert_valence = invert_valence  # 保存反转标志
+        self.invert_arousal = invert_arousal  # 保存反转标志
+        self.enhance_valence = enhance_valence
+        self.valence_layers = valence_layers
         
         # 词嵌入层
         self.embedding = nn.Embedding(
@@ -357,38 +370,74 @@ class LTC_NCP_RNN(nn.Module):
         
         # 如果使用元特征，增加输入维度
         self.meta_feature_size = 3 if use_meta_features else 0  # 句长、标点密度和可能的额外特征
-        self.total_input_size = hidden_output_size + self.meta_feature_size
         
-        # 创建输入适配器，用于处理元特征和维度变化 - 363是实际输入维度
-        self.input_adapter = nn.Linear(363, hidden_size)  # 固定为363，解决维度不匹配问题
+        # 计算实际的输入维度 - 考虑双向和多层次因素
+        self.ltc_output_size = hidden_size
+        if multi_level:
+            # 多层次输出尺寸取决于层数
+            self.ltc_output_size = hidden_size  # 多层次模型已经在内部合并层
+        
+        # 双向效果
+        if bidirectional:
+            self.ltc_output_size *= 2
+            
+        # 总输入维度计算
+        self.total_input_size = self.ltc_output_size + self.meta_feature_size
+        
+        # 记录实际维度供调试
+        print(f"总输入维度: {self.total_input_size}, LTC输出维度: {self.ltc_output_size}, 元特征维度: {self.meta_feature_size}")
+        
+        # 创建输入适配器，用于处理元特征和维度变化
+        self.input_adapter = nn.Linear(self.total_input_size, hidden_size)
         
         # 输出层 - 为V和A创建专门的处理通道
         # 1. 共享基础层
         self.shared_layer = nn.Sequential(
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, hidden_size),  # 固定输入维度为hidden_size
-            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(), 
             nn.Dropout(dropout/2)
         )
         
         # 2. 创建情感分支 - V分支
-        self.valence_branch = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size // 2),
-            nn.Tanh(),  # 使用tanh激活更适合情感分析
-            nn.Dropout(dropout/3),
-            nn.Linear(hidden_size // 2, hidden_size // 4),
-            nn.Tanh(),
-            nn.Linear(hidden_size // 4, 1)  # 单独输出V值
-        )
+        if enhance_valence:
+            valence_layers_list = []
+            # 正确设置输入维度为hidden_size
+            input_size = hidden_size
+            
+            # 添加额外的valence专用层
+            for i in range(valence_layers):
+                # 第一层输入为hidden_size，输出相同
+                if i == 0:
+                    valence_layers_list.append(nn.Linear(input_size, input_size))
+                else:
+                    # 后续层保持相同维度
+                    valence_layers_list.append(nn.Linear(input_size, input_size))
+                valence_layers_list.append(nn.LeakyReLU())
+                valence_layers_list.append(nn.Dropout(dropout * 0.8))
+            
+            # 最后两层降维到输出
+            valence_layers_list.append(nn.Linear(input_size, input_size // 2))
+            valence_layers_list.append(nn.Tanh())
+            valence_layers_list.append(nn.Linear(input_size // 2, 1))
+            
+            self.valence_branch = nn.Sequential(*valence_layers_list)
+            print(f"创建增强的valence分支，层数: {valence_layers}，输入维度: {input_size}")
+        else:
+            # 标准valence分支 - 确保维度正确
+            self.valence_branch = nn.Sequential(
+                nn.Linear(hidden_size, hidden_size // 2),
+                nn.Tanh(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_size // 2, 1)
+            )
         
-        # 3. 创建情感分支 - A分支
+        # 3. 创建情感分支 - A分支，使其与valence分支匹配
         self.arousal_branch = nn.Sequential(
             nn.Linear(hidden_size, hidden_size // 2),
-            nn.Tanh(),  # 使用tanh激活更适合情感分析
-            nn.Dropout(dropout/3),
-            nn.Linear(hidden_size // 2, hidden_size // 4),
             nn.Tanh(),
-            nn.Linear(hidden_size // 4, 1)  # 单独输出A值
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size // 2, 1)
         )
         
         # 4. 创建V-A交互层，捕捉情感维度间的关系
@@ -663,15 +712,36 @@ class LTC_NCP_RNN(nn.Module):
             final_hidden = torch.cat([final_hidden, meta_features], dim=1)
         
         # 调试维度信息
-        debug_print(f"最终特征维度: {final_hidden.shape}, 共享层输入维度: {self.shared_layer[1].in_features}")
+        debug_print(f"最终特征维度: {final_hidden.shape}, 输入适配器期望维度: {self.total_input_size}")
+        
+        # 确保维度匹配 - 如果不匹配，进行调整
+        if final_hidden.size(1) != self.total_input_size:
+            print(f"警告: 输入维度不匹配 ({final_hidden.size(1)} vs {self.total_input_size})，调整中...")
+            if final_hidden.size(1) > self.total_input_size:
+                # 截断多余维度
+                final_hidden = final_hidden[:, :self.total_input_size]
+                print(f"已裁剪维度至: {final_hidden.size(1)}")
+            else:
+                # 填充不足的维度
+                padding = torch.zeros(final_hidden.size(0), 
+                                     self.total_input_size - final_hidden.size(1),
+                                     device=final_hidden.device)
+                final_hidden = torch.cat([final_hidden, padding], dim=1)
+                print(f"已填充维度至: {final_hidden.size(1)}")
         
         # 使用预定义的输入适配器处理维度
-        final_hidden = self.input_adapter(final_hidden)
-        debug_print(f"应用输入适配器后维度: {final_hidden.shape}")
+        try:
+            final_hidden = self.input_adapter(final_hidden)
+            debug_print(f"应用输入适配器后维度: {final_hidden.shape}")
+        except Exception as e:
+            print(f"输入适配器错误: {e}，输入维度: {final_hidden.shape}")
+            # 创建紧急备用
+            final_hidden = torch.zeros(final_hidden.size(0), self.hidden_size, device=final_hidden.device)
         
         # 8. 通过共享基础层
         try:
             shared_features = self.shared_layer(final_hidden)
+            debug_print(f"共享层输出维度: {shared_features.shape}")
             # 检查是否有NaN
             if torch.isnan(shared_features).any():
                 print("警告: 共享层输出包含NaN值，使用0替换") if DEBUG else None
@@ -696,24 +766,26 @@ class LTC_NCP_RNN(nn.Module):
             attention_weights = torch.ones(final_hidden.size(0), 1, device=final_hidden.device) * 0.5
         
         # 10. 使用注意力增强的特征通过分支层
-        # Valence分支
+        # Valence分支 - 使用完整的shared_features
         try:
-            v_output = self.valence_branch(shared_features * attention_weights)
+            debug_print(f"Valence分支输入维度: {shared_features.shape}")
+            v_output = self.valence_branch(shared_features)
             if torch.isnan(v_output).any():
                 print("警告: Valence输出包含NaN值，使用0替换") if DEBUG else None
                 v_output = torch.zeros_like(v_output)
         except Exception as e:
-            print(f"警告: Valence分支处理出错: {e}")
+            print(f"警告: Valence分支处理出错: {e}，输入维度: {shared_features.shape}")
             v_output = torch.zeros(final_hidden.size(0), 1, device=final_hidden.device)
         
         # Arousal分支
         try:
-            a_output = self.arousal_branch(shared_features * (1 - attention_weights * 0.5))
+            debug_print(f"Arousal分支输入维度: {shared_features.shape}")
+            a_output = self.arousal_branch(shared_features)
             if torch.isnan(a_output).any():
                 print("警告: Arousal输出包含NaN值，使用0替换") if DEBUG else None
                 a_output = torch.zeros_like(a_output)
         except Exception as e:
-            print(f"警告: Arousal分支处理出错: {e}")
+            print(f"警告: Arousal分支处理出错: {e}，输入维度: {shared_features.shape}")
             a_output = torch.zeros(final_hidden.size(0), 1, device=final_hidden.device)
         
         # 情感交互层
@@ -742,6 +814,13 @@ class LTC_NCP_RNN(nn.Module):
             outputs = torch.nan_to_num(outputs, nan=0.0)
             # 应用tanh确保在[-1,1]范围内
             outputs = torch.tanh(outputs)
+        
+        # 应用价值和效度反转（如果启用）
+        if self.invert_valence:
+            outputs[:, 0] = -outputs[:, 0]  # 反转价值维度
+        
+        if self.invert_arousal:
+            outputs[:, 1] = -outputs[:, 1]  # 反转效度维度
         
         return outputs
     

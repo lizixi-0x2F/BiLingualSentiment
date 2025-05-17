@@ -19,6 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 from typing import Dict, List, Any, Tuple, Optional
 import math
+import sys
 
 import torch
 import torch.nn as nn
@@ -58,6 +59,76 @@ except ImportError:
     pass
 except AttributeError:
     pass
+
+# 情感标签一致性检查函数
+def check_emotion_label_consistency(df, v_col, a_col, text_col=None):
+    """
+    检查情感标签的一致性
+    
+    参数:
+        df: 数据框
+        v_col: 价值列名
+        a_col: 效度列名
+        text_col: 文本列名(可选，用于示例)
+    
+    返回:
+        问题数据统计字典
+    """
+    stats = {
+        "total_samples": len(df),
+        "v_range": [df[v_col].min(), df[v_col].max()],
+        "a_range": [df[a_col].min(), df[a_col].max()],
+        "v_mean": df[v_col].mean(),
+        "a_mean": df[a_col].mean(),
+        "extreme_pos_v": sum(df[v_col] > 0.8),
+        "extreme_neg_v": sum(df[v_col] < -0.8),
+        "extreme_pos_a": sum(df[a_col] > 0.8),
+        "extreme_neg_a": sum(df[a_col] < -0.8),
+        "neutral_samples": sum((abs(df[v_col]) < 0.2) & (abs(df[a_col]) < 0.2))
+    }
+    
+    # 象限分布统计
+    stats["q1_count"] = sum((df[v_col] > 0) & (df[a_col] > 0))  # 喜悦/兴奋
+    stats["q2_count"] = sum((df[v_col] > 0) & (df[a_col] < 0))  # 满足/平静
+    stats["q3_count"] = sum((df[v_col] < 0) & (df[a_col] > 0))  # 愤怒/焦虑
+    stats["q4_count"] = sum((df[v_col] < 0) & (df[a_col] < 0))  # 悲伤/抑郁
+    
+    # 检查不一致样本 (示例：带有"开心"的文本但V值为负)
+    if text_col is not None:
+        positive_keywords = ["开心", "高兴", "喜欢", "happy", "joy", "喜悦", "满意", "满足"]
+        negative_keywords = ["难过", "伤心", "生气", "愤怒", "悲伤", "讨厌", "失望", "焦虑", "sad", "angry", "fear"]
+        
+        potential_issues = []
+        
+        # 检查带正面词但V为负的样本
+        for keyword in positive_keywords:
+            mask = df[text_col].str.contains(keyword, na=False) & (df[v_col] < -0.3)
+            if sum(mask) > 0:
+                samples = df[mask].sample(min(3, sum(mask)))
+                for _, row in samples.iterrows():
+                    potential_issues.append({
+                        "text": row[text_col],
+                        "v": row[v_col],
+                        "a": row[a_col],
+                        "issue": f"包含正面词'{keyword}'但V值为负"
+                    })
+        
+        # 检查带负面词但V为正的样本
+        for keyword in negative_keywords:
+            mask = df[text_col].str.contains(keyword, na=False) & (df[v_col] > 0.3)
+            if sum(mask) > 0:
+                samples = df[mask].sample(min(3, sum(mask)))
+                for _, row in samples.iterrows():
+                    potential_issues.append({
+                        "text": row[text_col],
+                        "v": row[v_col],
+                        "a": row[a_col],
+                        "issue": f"包含负面词'{keyword}'但V值为正"
+                    })
+        
+        stats["potential_issues"] = potential_issues
+    
+    return stats
 
 # 检查添加的额外元特征是否可用
 def add_sentence_count(df, text_col="text"):
@@ -106,6 +177,52 @@ class MSE_CCC_Loss(nn.Module):
         loss = self.mse_weight * mse_loss + self.ccc_weight * (1 - avg_ccc)
         
         return loss
+
+class EmotionDirectionLoss(nn.Module):
+    """
+    情感方向感知损失函数
+    增加对错误方向(VA象限错误)的惩罚
+    可选择重点关注valence维度
+    """
+    def __init__(self, base_loss=nn.MSELoss(), direction_weight=0.5, valence_weight=1.0):
+        super(EmotionDirectionLoss, self).__init__()
+        self.base_loss = base_loss
+        self.direction_weight = direction_weight
+        self.valence_weight = valence_weight
+    
+    def forward(self, predictions, targets):
+        # 基础损失(如MSE)
+        base_loss_val = self.base_loss(predictions, targets)
+        
+        # 计算方向损失 - 惩罚象限错误
+        # 提取V和A维度
+        pred_v, pred_a = predictions[:, 0], predictions[:, 1]
+        target_v, target_a = targets[:, 0], targets[:, 1]
+        
+        # 计算符号是否一致(方向一致)
+        v_sign_match = ((pred_v * target_v) >= 0)
+        a_sign_match = ((pred_a * target_a) >= 0)
+        
+        # 方向损失 - 不同象限的样本会有较大惩罚
+        # 使用带权重的组合 - 增加对V维度的关注
+        v_loss = torch.mean(1.0 - v_sign_match.float()) * self.valence_weight
+        a_loss = torch.mean(1.0 - a_sign_match.float())
+        direction_loss = (v_loss + a_loss) / (1.0 + self.valence_weight)
+        
+        # 计算V和A各自的MSE损失
+        v_mse = torch.mean((pred_v - target_v) ** 2) * self.valence_weight
+        a_mse = torch.mean((pred_a - target_a) ** 2)
+        
+        # 总损失 - 基础损失加上方向损失
+        total_loss = base_loss_val + self.direction_weight * direction_loss
+        
+        # 如果启用了valence_weight，增加valence的权重
+        if self.valence_weight > 1.0:
+            # 调整基础损失中的valence权重
+            adjusted_loss = (v_mse + a_mse) / (1.0 + self.valence_weight)
+            total_loss = adjusted_loss + self.direction_weight * direction_loss
+        
+        return total_loss
 
 def mixup_data(x, y, alpha=1.0):
     """执行Mixup数据增强"""
@@ -198,106 +315,80 @@ class EmotionDataset(Dataset):
         
         # 3. 清理元特征
         if 'meta_features' in self.config:
-            for col in self.config['meta_features']:
-                if col in self.df.columns:
-                    # 报告NaN值
-                    nan_count = self.df[col].isna().sum()
-                    if nan_count > 0:
-                        print(f"警告: 元特征 {col} 中有 {nan_count} 个NaN值")
-                    # 填充NaN值
-                    if col == 'text_length':
-                        # 文本长度为0
-                        self.df[col] = self.df[col].fillna(0)
-                    elif col == 'punct_density':
-                        # 标点密度为0
-                        self.df[col] = self.df[col].fillna(0)
-                    elif col == 'sentence_count':
-                        # 句子数量为1
-                        self.df[col] = self.df[col].fillna(1)
+            for feature in self.config['meta_features']:
+                if feature in self.df.columns and self.df[feature].isna().sum() > 0:
+                    # 根据特征类型选择填充策略
+                    if self.df[feature].dtype in [np.int64, np.int32, np.float64, np.float32]:
+                        # 数值型特征用均值填充
+                        self.df[feature] = self.df[feature].fillna(self.df[feature].mean())
                     else:
-                        # 其他特征填0
-                        self.df[col] = self.df[col].fillna(0)
+                        # 其他类型用众数填充
+                        self.df[feature] = self.df[feature].fillna(self.df[feature].mode()[0])
     
     def _oversample_extreme_valence(self):
-        """对极端Valence值（大于0.7或小于-0.7）的样本进行上采样，每种上采样两倍"""
-        # 获取V值极高的样本
-        high_v_samples = self.df[self.df[self.v_col] > 0.7]
-        # 获取V值极低的样本
-        low_v_samples = self.df[self.df[self.v_col] < -0.7]
+        """对极端价值样本进行上采样，以平衡数据集"""
+        # 原始数据框
+        original_df = self.df.copy()
         
-        # 添加上采样的极端样本
-        if not high_v_samples.empty:
-            # 上采样两倍意味着添加2份原始样本
-            self.df = pd.concat([self.df, high_v_samples, high_v_samples], ignore_index=True)
-            print(f"上采样高V值样本 ({len(high_v_samples)} -> {len(high_v_samples)*3})")
+        # 定义极端值范围
+        extreme_pos = self.df[self.v_col] > 0.7
+        extreme_neg = self.df[self.v_col] < -0.7
         
-        if not low_v_samples.empty:
-            # 上采样两倍意味着添加2份原始样本
-            self.df = pd.concat([self.df, low_v_samples, low_v_samples], ignore_index=True)
-            print(f"上采样低V值样本 ({len(low_v_samples)} -> {len(low_v_samples)*3})")
+        # 计算上采样系数 (增加约50%的样本)
+        pos_samples = self.df[extreme_pos]
+        neg_samples = self.df[extreme_neg]
         
-        print(f"上采样后数据集大小: {len(self.df)}")
+        # 连接原始数据框和上采样样本
+        self.df = pd.concat([original_df, pos_samples, neg_samples], ignore_index=True)
+        
+        logger.info(f"上采样后，数据集大小从 {len(original_df)} 增加到 {len(self.df)}")
     
     def __len__(self):
         return len(self.df)
     
     def __getitem__(self, idx):
-        """获取单个样本"""
-        # 获取文本并确保是字符串类型
-        text = self.df.iloc[idx][self.text_col]
-        if not isinstance(text, str):
-            if pd.isna(text):
-                text = ""
-            else:
-                text = str(text)
-                
-        # 获取情感标签
-        valence = float(self.df.iloc[idx][self.v_col])  # V值
-        arousal = float(self.df.iloc[idx][self.a_col])  # A值
+        row = self.df.iloc[idx]
         
-        # 再次确保不会有NaN值 - 新增安全检查
-        if math.isnan(valence) or math.isinf(valence):
-            valence = 0.0
-        if math.isnan(arousal) or math.isinf(arousal):
-            arousal = 0.0
+        # 获取文本和情感标签
+        text = str(row[self.text_col])
+        valence = float(row[self.v_col])
+        arousal = float(row[self.a_col])
         
-        # 对文本进行标记化
+        # 编码文本为token IDs
         tokens = self.tokenizer.encode(
             text, 
-            max_length=self.max_length, 
+            max_length=self.max_length,
             truncation=True,
             padding='max_length',
             return_tensors='pt'
-        ).squeeze(0)
+        )
         
-        # 提取元特征
-        meta_features = None
-        if self.use_meta_features and len(self.meta_features) > 0:
-            try:
-                # 确保所有元特征都是浮点数且没有NaN
-                meta_values = []
-                for col in self.meta_features:
-                    val = float(self.df.iloc[idx][col])
-                    # 检查并处理可能的NaN或无限值
-                    if math.isnan(val) or math.isinf(val):
-                        val = 0.0
-                    meta_values.append(val)
-                
-                meta_features = torch.tensor(meta_values, dtype=torch.float32)
-            except Exception as e:
-                # 如果出错，使用默认值
-                print(f"警告: 处理元特征时出错: {str(e)}")
-                meta_features = torch.zeros(len(self.meta_features), dtype=torch.float32)
+        # 创建VA值张量
+        va_values = torch.tensor([valence, arousal], dtype=torch.float32)
         
-        # 构建结果字典
+        # 构建字典结果
         result = {
             'tokens': tokens,
-            'targets': torch.tensor([valence, arousal], dtype=torch.float32),
-            'length': min(len(text), self.max_length)
+            'targets': va_values,
+            'length': len(text)
         }
         
-        if meta_features is not None:
-            result['meta_features'] = meta_features
+        # 如果启用元特征，提取元特征值
+        if self.use_meta_features:
+            meta_features = []
+            for feature in self.meta_features:
+                value = row[feature]
+                # 确保值是数值型的
+                if isinstance(value, (int, float)):
+                    meta_features.append(float(value))
+                else:
+                    try:
+                        meta_features.append(float(value))
+                    except (ValueError, TypeError):
+                        # 对于非数值型特征，可以尝试进行编码或使用默认值
+                        meta_features.append(0.0)
+            
+            result['meta_features'] = torch.tensor(meta_features, dtype=torch.float32)
         
         return result
 
@@ -426,105 +517,112 @@ def set_seed(seed):
 
 
 def prepare_data(config):
-    """准备数据集和分词器"""
-    # 1. 从训练集文件加载文本
-    train_en_df = pd.read_csv(config['data']['train']['en'])
-    train_zh_df = pd.read_csv(config['data']['train']['zh'])
+    """准备训练、验证和测试数据"""
+    data_config = config['data']
+    train_path = data_config['train_path']
+    val_path = data_config.get('val_path', None)
+    test_path = data_config.get('test_path', None)
     
-    # 2. 创建分词器并构建词汇表
-    text_col = config['data']['text_col']
-    # 确保文本列都是字符串类型
-    train_en_df[text_col] = train_en_df[text_col].fillna("").astype(str)
-    train_zh_df[text_col] = train_zh_df[text_col].fillna("").astype(str)
+    # 检查文件是否存在
+    if not os.path.exists(train_path):
+        raise FileNotFoundError(f"训练数据文件不存在: {train_path}")
+    if val_path and not os.path.exists(val_path):
+        raise FileNotFoundError(f"验证数据文件不存在: {val_path}")
+    if test_path and not os.path.exists(test_path):
+        raise FileNotFoundError(f"测试数据文件不存在: {test_path}")
     
-    all_texts = list(train_en_df[text_col]) + list(train_zh_df[text_col])
-    tokenizer = SimpleTokenizer(vocab_size=10000)
-    tokenizer.build_vocab(all_texts, min_freq=2)
+    # 加载数据集
+    train_df = pd.read_csv(train_path)
+    val_df = pd.read_csv(val_path) if val_path else None
     
-    logger.info(f"词汇表大小: {tokenizer.vocab_size_actual}")
+    # 检查训练集标签一致性
+    logger.info("检查训练集标签一致性...")
+    train_stats = check_emotion_label_consistency(
+        train_df, 
+        config['data']['v_col'], 
+        config['data']['a_col'],
+        config['data']['text_col']
+    )
     
-    # 3. 创建数据集
-    max_length = config['data'].get('max_length', 100)
+    # 输出统计信息
+    logger.info(f"训练集大小: {train_stats['total_samples']}")
+    logger.info(f"价值范围: {train_stats['v_range']}, 平均值: {train_stats['v_mean']:.3f}")
+    logger.info(f"效度范围: {train_stats['a_range']}, 平均值: {train_stats['a_mean']:.3f}")
+    logger.info(f"象限分布: Q1(喜悦)={train_stats['q1_count']}, Q2(满足)={train_stats['q2_count']}, Q3(愤怒)={train_stats['q3_count']}, Q4(悲伤)={train_stats['q4_count']}")
     
-    # 英文数据集
-    train_en_dataset = EmotionDataset(
-        config['data']['train']['en'], 
+    # 检查并报告潜在问题样本
+    if 'potential_issues' in train_stats and len(train_stats['potential_issues']) > 0:
+        logger.warning(f"发现 {len(train_stats['potential_issues'])} 个潜在标注问题样本")
+        for i, issue in enumerate(train_stats['potential_issues'][:5]):  # 只显示前5个
+            logger.warning(f"问题样本 {i+1}: {issue['text']} | V={issue['v']:.2f}, A={issue['a']:.2f} | {issue['issue']}")
+        
+        # 保存问题样本到文件
+        issue_df = pd.DataFrame(train_stats['potential_issues'])
+        issue_path = os.path.join(config['output_dir'], 'potential_label_issues.csv')
+        issue_df.to_csv(issue_path, index=False)
+        logger.warning(f"问题样本已保存到: {issue_path}")
+        
+        # 添加交互确认
+        if config.get('data', {}).get('confirm_training', False):
+            confirm = input("检测到潜在标签问题，是否继续训练? (y/n): ")
+            if confirm.lower() != 'y':
+                logger.info("用户选择退出训练")
+                sys.exit(0)
+        else:
+            logger.info("已禁用训练确认，继续训练...")
+    
+    # 构建分词器
+    max_vocab_size = data_config.get('vocab_size', 10000)
+    tokenizer = SimpleTokenizer(vocab_size=max_vocab_size)
+    
+    # 构建词汇表（如果需要）
+    if not hasattr(tokenizer, 'word2idx') or len(tokenizer.word2idx) <= 2:  # 只有PAD和UNK
+        tokenizer.build_vocab([str(text) for text in train_df[data_config['text_col']]])
+        
+    # 创建数据集
+    max_length = data_config.get('max_length', 100)
+    
+    train_dataset = EmotionDataset(
+        train_path, 
         tokenizer, 
-        config['data'], 
-        max_length, 
+        data_config, 
+        max_length=max_length,
         is_training=True
     )
-    val_en_dataset = EmotionDataset(
-        config['data']['val']['en'], 
-        tokenizer, 
-        config['data'], 
-        max_length, 
-        is_training=False
-    )
-    test_en_dataset = EmotionDataset(
-        config['data']['test']['en'], 
-        tokenizer, 
-        config['data'], 
-        max_length, 
-        is_training=False
-    )
     
-    # 中文数据集
-    train_zh_dataset = EmotionDataset(
-        config['data']['train']['zh'], 
-        tokenizer, 
-        config['data'], 
-        max_length, 
-        is_training=True
-    )
-    val_zh_dataset = EmotionDataset(
-        config['data']['val']['zh'], 
-        tokenizer, 
-        config['data'], 
-        max_length, 
-        is_training=False
-    )
-    test_zh_dataset = EmotionDataset(
-        config['data']['test']['zh'], 
-        tokenizer, 
-        config['data'], 
-        max_length, 
-        is_training=False
-    )
+    val_dataset = None
+    if val_path:
+        val_dataset = EmotionDataset(
+            val_path, 
+            tokenizer, 
+            data_config, 
+            max_length=max_length,
+            is_training=False
+        )
     
-    # 4. 合并数据集
-    train_dataset = ConcatDataset([train_en_dataset, train_zh_dataset])
-    val_dataset = ConcatDataset([val_en_dataset, val_zh_dataset])
-    test_dataset = ConcatDataset([test_en_dataset, test_zh_dataset])
-    
-    logger.info(f"训练集大小: {len(train_dataset)}")
-    logger.info(f"验证集大小: {len(val_dataset)}")
-    logger.info(f"测试集大小: {len(test_dataset)}")
-    
-    # 5. 创建数据加载器
-    batch_size = config['training']['batch_size']
-    num_workers = config['hardware'].get('num_workers', 4)
+    # 创建数据加载器
+    batch_size = config.get('batch_size', 32)
+    num_workers = config.get('num_workers', 4)
     
     train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=num_workers
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=num_workers
-    )
-    test_loader = DataLoader(
-        test_dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=num_workers
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True
     )
     
-    return tokenizer, train_loader, val_loader, test_loader
+    val_loader = None
+    if val_dataset:
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+    
+    return train_loader, val_loader, tokenizer
 
 
 def create_model(config, vocab_size):
@@ -534,9 +632,18 @@ def create_model(config, vocab_size):
     # 使用Transformer相关设置
     use_transformer = model_config.get('use_transformer', False)
     
+    # 获取反转标志
+    invert_valence = model_config.get('invert_valence', False)
+    invert_arousal = model_config.get('invert_arousal', False)
+    
     # 记录创建细节
     logger.info(f"创建模型: LTC-NCP-RNN | 词汇表大小: {vocab_size}")
     logger.info(f"集成方法: {model_config['integration_method']} | 隐藏层大小: {model_config['hidden_size']}")
+    
+    if invert_valence:
+        logger.info("启用价值(V)预测反转")
+    if invert_arousal:
+        logger.info("启用效度(A)预测反转")
     
     if use_transformer:
         transformer_config = model_config.get('transformer', {})
@@ -564,7 +671,9 @@ def create_model(config, vocab_size):
             multi_level=model_config.get('multi_level', True),
             emotion_focused=model_config.get('emotion_focused', True),
             heterogeneous=model_config.get('heterogeneous', True),
-            use_transformer=use_transformer
+            use_transformer=use_transformer,
+            invert_valence=invert_valence,     # 添加价值反转参数
+            invert_arousal=invert_arousal      # 添加效度反转参数
         )
         
         # 输出双向信息
@@ -614,6 +723,12 @@ def create_model(config, vocab_size):
 
 def concordance_correlation_coefficient(y_true, y_pred):
     """计算一致性相关系数 (CCC)"""
+    # 确保输入是torch张量
+    if not isinstance(y_true, torch.Tensor):
+        y_true = torch.tensor(y_true, dtype=torch.float32)
+    if not isinstance(y_pred, torch.Tensor):
+        y_pred = torch.tensor(y_pred, dtype=torch.float32)
+        
     y_true_mean = torch.mean(y_true)
     y_pred_mean = torch.mean(y_pred)
     
@@ -623,135 +738,117 @@ def concordance_correlation_coefficient(y_true, y_pred):
     covariance = torch.mean((y_true - y_true_mean) * (y_pred - y_pred_mean))
     
     ccc = (2 * covariance) / (y_true_var + y_pred_var + (y_true_mean - y_pred_mean) ** 2)
-    return ccc
+    return ccc.item()  # 返回标量值而不是张量
 
 
 def compute_metrics(y_true, y_pred):
-    """计算所有评估指标"""
-    # 转为NumPy数组
+    """计算评估指标"""
     if isinstance(y_true, torch.Tensor):
-        y_true = y_true.detach().cpu().numpy()
+        y_true = y_true.cpu().numpy()
     if isinstance(y_pred, torch.Tensor):
-        y_pred = y_pred.detach().cpu().numpy()
+        y_pred = y_pred.cpu().numpy()
     
-    # 检查并替换NaN值
-    y_true = np.nan_to_num(y_true, nan=0.0)
-    y_pred = np.nan_to_num(y_pred, nan=0.0)
-    
-    # 计算MSE、RMSE和MAE
-    try:
-        mse = mean_squared_error(y_true, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_true, y_pred)
-    except Exception as e:
-        print(f"计算整体指标时出错: {str(e)}")
-        mse = 1.0
-        rmse = 1.0
-        mae = 1.0
-    
-    # 分别计算V和A的指标
+    # 计算每个维度的指标
     metrics_v = {}
     metrics_a = {}
     
-    for i, dim in enumerate(['V', 'A']):
-        try:
-            y_true_dim = y_true[:, i]
-            y_pred_dim = y_pred[:, i]
-            
-            # 再次检查并替换NaN值
-            y_true_dim = np.nan_to_num(y_true_dim, nan=0.0)
-            y_pred_dim = np.nan_to_num(y_pred_dim, nan=0.0)
-            
-            # 一致性相关系数
-            ccc = concordance_correlation_coefficient(
-                torch.tensor(y_true_dim),
-                torch.tensor(y_pred_dim)
-            ).item()
-            
-            # 确保CCC是有效值
-            if math.isnan(ccc) or math.isinf(ccc):
-                ccc = 0.0
-            
-            # Spearman相关系数
-            try:
-                spearman_corr, _ = spearmanr(y_true_dim, y_pred_dim)
-                if math.isnan(spearman_corr) or math.isinf(spearman_corr):
-                    spearman_corr = 0.0
-            except Exception:
-                spearman_corr = 0.0
-            
-            # Pearson相关系数（如果需要）
-            try:
-                pearson_corr, _ = pearsonr(y_true_dim, y_pred_dim)
-                if math.isnan(pearson_corr) or math.isinf(pearson_corr):
-                    pearson_corr = 0.0
-            except Exception:
-                pearson_corr = 0.0
-            
-            # MSE、RMSE和MAE
-            mse_dim = mean_squared_error(y_true_dim, y_pred_dim)
-            rmse_dim = np.sqrt(mse_dim)
-            mae_dim = mean_absolute_error(y_true_dim, y_pred_dim)
-            
-            if dim == 'V':
-                metrics_v = {
-                    'mse': mse_dim,
-                    'rmse': rmse_dim,
-                    'mae': mae_dim,
-                    'ccc': ccc,
-                    'spearman': spearman_corr,
-                    'pearson': pearson_corr
-                }
-            else:
-                metrics_a = {
-                    'mse': mse_dim,
-                    'rmse': rmse_dim,
-                    'mae': mae_dim,
-                    'ccc': ccc,
-                    'spearman': spearman_corr,
-                    'pearson': pearson_corr
-                }
-        except Exception as e:
-            print(f"计算{dim}维度指标时出错: {str(e)}")
-            # 使用默认值
-            default_metrics = {
-                'mse': 1.0,
-                'rmse': 1.0,
-                'mae': 1.0,
-                'ccc': 0.0,
-                'spearman': 0.0,
-                'pearson': 0.0
-            }
-            if dim == 'V':
-                metrics_v = default_metrics
-            else:
-                metrics_a = default_metrics
+    # 计算RMSE
+    rmse_v = np.sqrt(mean_squared_error(y_true[:, 0], y_pred[:, 0]))
+    rmse_a = np.sqrt(mean_squared_error(y_true[:, 1], y_pred[:, 1]))
     
-    # 确保两个指标字典都存在
-    if not metrics_v:
-        metrics_v = {
-            'mse': 1.0, 'rmse': 1.0, 'mae': 1.0,
-            'ccc': 0.0, 'spearman': 0.0, 'pearson': 0.0
-        }
-    if not metrics_a:
-        metrics_a = {
-            'mse': 1.0, 'rmse': 1.0, 'mae': 1.0,
-            'ccc': 0.0, 'spearman': 0.0, 'pearson': 0.0
-        }
+    # 计算MAE
+    mae_v = mean_absolute_error(y_true[:, 0], y_pred[:, 0])
+    mae_a = mean_absolute_error(y_true[:, 1], y_pred[:, 1])
     
-    # 合并指标
-    metrics = {
-        'overall': {
-            'mse': mse,
-            'rmse': rmse,
-            'mae': mae
-        },
-        'V': metrics_v,
-        'A': metrics_a,
-        'avg_ccc': (metrics_v['ccc'] + metrics_a['ccc']) / 2
+    # 计算相关系数
+    corr_v, _ = pearsonr(y_true[:, 0], y_pred[:, 0])
+    corr_a, _ = pearsonr(y_true[:, 1], y_pred[:, 1])
+    
+    # 计算Spearman相关系数
+    spearman_v, _ = spearmanr(y_true[:, 0], y_pred[:, 0])
+    spearman_a, _ = spearmanr(y_true[:, 1], y_pred[:, 1])
+    
+    # 计算CCC
+    ccc_v = concordance_correlation_coefficient(y_true[:, 0], y_pred[:, 0])
+    ccc_a = concordance_correlation_coefficient(y_true[:, 1], y_pred[:, 1])
+    
+    # 汇总指标
+    metrics_v = {
+        "rmse": rmse_v,
+        "mae": mae_v,
+        "corr": corr_v,
+        "spearman": spearman_v,
+        "ccc": ccc_v
     }
     
-    return metrics
+    metrics_a = {
+        "rmse": rmse_a,
+        "mae": mae_a,
+        "corr": corr_a,
+        "spearman": spearman_a,
+        "ccc": ccc_a
+    }
+    
+    # 计算平均/整体指标
+    avg_rmse = (rmse_v + rmse_a) / 2
+    avg_mae = (mae_v + mae_a) / 2
+    avg_corr = (corr_v + corr_a) / 2
+    avg_spearman = (spearman_v + spearman_a) / 2
+    avg_ccc = (ccc_v + ccc_a) / 2
+    
+    # 新增：计算象限准确率
+    true_v, true_a = y_true[:, 0], y_true[:, 1]
+    pred_v, pred_a = y_pred[:, 0], y_pred[:, 1]
+    
+    # 计算象限
+    true_quadrant = np.zeros(len(true_v), dtype=int)
+    true_quadrant[(true_v >= 0) & (true_a >= 0)] = 1  # 喜悦/兴奋
+    true_quadrant[(true_v >= 0) & (true_a < 0)] = 2   # 满足/平静
+    true_quadrant[(true_v < 0) & (true_a >= 0)] = 3   # 愤怒/焦虑
+    true_quadrant[(true_v < 0) & (true_a < 0)] = 4    # 悲伤/抑郁
+    
+    pred_quadrant = np.zeros(len(pred_v), dtype=int)
+    pred_quadrant[(pred_v >= 0) & (pred_a >= 0)] = 1
+    pred_quadrant[(pred_v >= 0) & (pred_a < 0)] = 2
+    pred_quadrant[(pred_v < 0) & (pred_a >= 0)] = 3
+    pred_quadrant[(pred_v < 0) & (pred_a < 0)] = 4
+    
+    # 计算象限准确率
+    quadrant_accuracy = np.mean(true_quadrant == pred_quadrant)
+    
+    # 计算象限F1分数
+    from sklearn.metrics import f1_score
+    try:
+        quadrant_f1_macro = f1_score(true_quadrant, pred_quadrant, average='macro')
+        quadrant_f1_weighted = f1_score(true_quadrant, pred_quadrant, average='weighted')
+    except:
+        quadrant_f1_macro = 0.0
+        quadrant_f1_weighted = 0.0
+    
+    # 整合所有指标
+    overall_metrics = {
+        "rmse": avg_rmse,
+        "mae": avg_mae,
+        "corr": avg_corr,
+        "spearman": avg_spearman,
+        "ccc": avg_ccc
+    }
+    
+    results = {
+        "V": metrics_v,
+        "A": metrics_a,
+        "overall": overall_metrics,  # 确保包含overall键
+        "avg_rmse": avg_rmse,
+        "avg_mae": avg_mae,
+        "avg_corr": avg_corr,
+        "avg_spearman": avg_spearman,
+        "avg_ccc": avg_ccc,
+        "quadrant_accuracy": quadrant_accuracy,
+        "quadrant_f1_macro": quadrant_f1_macro,
+        "quadrant_f1_weighted": quadrant_f1_weighted
+    }
+    
+    return results
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device, config, scheduler=None, scaler=None):
@@ -993,6 +1090,47 @@ def validate(model, val_loader, criterion, device, config):
     all_targets = torch.cat(all_targets, dim=0)
     metrics = compute_metrics(all_targets, all_preds)
     
+    # 计算并记录象限混淆矩阵
+    all_preds_np = all_preds.cpu().numpy()
+    all_targets_np = all_targets.cpu().numpy()
+    
+    true_v, true_a = all_targets_np[:, 0], all_targets_np[:, 1]
+    pred_v, pred_a = all_preds_np[:, 0], all_preds_np[:, 1]
+    
+    # 计算象限
+    true_quadrant = np.zeros(len(true_v), dtype=int)
+    true_quadrant[(true_v >= 0) & (true_a >= 0)] = 1  # 喜悦/兴奋
+    true_quadrant[(true_v >= 0) & (true_a < 0)] = 2   # 满足/平静
+    true_quadrant[(true_v < 0) & (true_a >= 0)] = 3   # 愤怒/焦虑
+    true_quadrant[(true_v < 0) & (true_a < 0)] = 4    # 悲伤/抑郁
+    
+    pred_quadrant = np.zeros(len(pred_v), dtype=int)
+    pred_quadrant[(pred_v >= 0) & (pred_a >= 0)] = 1
+    pred_quadrant[(pred_v >= 0) & (pred_a < 0)] = 2
+    pred_quadrant[(pred_v < 0) & (pred_a >= 0)] = 3
+    pred_quadrant[(pred_v < 0) & (pred_a < 0)] = 4
+    
+    # 计算混淆矩阵
+    from sklearn.metrics import confusion_matrix
+    cm = confusion_matrix(true_quadrant, pred_quadrant, labels=[1, 2, 3, 4])
+    
+    # 添加到结果
+    metrics["confusion_matrix"] = cm.tolist()
+    
+    # 输出混淆矩阵
+    quadrant_names = ["喜悦/兴奋", "满足/平静", "愤怒/焦虑", "悲伤/抑郁"]
+    logger.info("情感象限混淆矩阵:")
+    cm_str = ""
+    cm_str += "预测 →\n实际 ↓ | " + " | ".join(f"{name}" for name in quadrant_names) + "\n"
+    cm_str += "-" * 60 + "\n"
+    for i, name in enumerate(quadrant_names):
+        cm_str += f"{name} | " + " | ".join(f"{cm[i, j]:5d}" for j in range(4)) + "\n"
+    logger.info("\n" + cm_str)
+    
+    # 如果有明显的象限反转，输出警告
+    if cm[0, 3] > cm[0, 0] or cm[3, 0] > cm[3, 3]:
+        logger.warning("⚠️ 检测到可能的情感象限反转！正面情感被预测为负面，或负面情感被预测为正面")
+    
     return avg_loss, metrics
 
 
@@ -1076,7 +1214,7 @@ def main():
     logger.info(f"设备: {device}")
     
     # 准备数据
-    tokenizer, train_loader, val_loader, test_loader = prepare_data(config)
+    train_loader, val_loader, tokenizer = prepare_data(config)
     
     # 创建模型
     model = create_model(config, tokenizer.vocab_size_actual)
@@ -1095,7 +1233,91 @@ def main():
         criterion = LabelSmoothingLoss(smoothing=label_smoothing)
         logger.info(f"使用标签平滑: {label_smoothing}")
     else:
-        criterion = MSE_CCC_Loss()
+        mse_weight = config.get('loss', {}).get('mse_weight', 1.0)
+        ccc_weight = config.get('loss', {}).get('ccc_weight', 0.0)
+        base_criterion = MSE_CCC_Loss(mse_weight=mse_weight, ccc_weight=ccc_weight)
+        
+        # 添加方向感知损失函数
+        if config.get('loss', {}).get('use_direction_loss', False):
+            direction_weight = config.get('loss', {}).get('direction_weight', 0.5)
+            valence_weight = config.get('loss', {}).get('valence_weight', 1.0)
+            criterion = EmotionDirectionLoss(
+                base_loss=base_criterion, 
+                direction_weight=direction_weight,
+                valence_weight=valence_weight
+            )
+            logger.info(f"使用情感方向感知损失函数，方向权重: {direction_weight}, 价值权重: {valence_weight}")
+        else:
+            criterion = base_criterion
+            logger.info(f"使用基础损失函数: MSE权重={mse_weight}, CCC权重={ccc_weight}")
+    
+    # 训练前分析数据，检查是否存在情感反转问题
+    if config.get('data', {}).get('analyze_before_training', True):
+        logger.info("执行训练前数据分析...")
+        
+        # 加载训练数据
+        train_path = config['data']['train_path']
+        train_df = pd.read_csv(train_path)
+        
+        # 定义情感词汇列表
+        positive_keywords = ["开心", "高兴", "喜欢", "happy", "joy", "喜悦", "满意", "满足"]
+        negative_keywords = ["难过", "伤心", "生气", "愤怒", "悲伤", "讨厌", "失望", "焦虑", "sad", "angry", "fear"]
+        
+        text_col = config['data']['text_col']
+        v_col = config['data']['v_col'] 
+        a_col = config['data']['a_col']
+        
+        # 检查积极情感词与V值关系
+        pos_with_neg_v = 0
+        for keyword in positive_keywords:
+            pos_with_neg_v += sum(train_df[text_col].str.contains(keyword, na=False) & (train_df[v_col] < -0.3))
+        
+        # 检查消极情感词与V值关系
+        neg_with_pos_v = 0
+        for keyword in negative_keywords:
+            neg_with_pos_v += sum(train_df[text_col].str.contains(keyword, na=False) & (train_df[v_col] > 0.3))
+        
+        logger.info(f"积极词汇对应负面V值的样本数: {pos_with_neg_v}")
+        logger.info(f"消极词汇对应正面V值的样本数: {neg_with_pos_v}")
+        
+        # 判断是否可能存在情感反转
+        if pos_with_neg_v > neg_with_pos_v:
+            logger.warning("⚠️ 检测到可能的情感标注反转! 建议检查训练数据")
+            
+            # 如果设置了自动反转标签，则设置模型参数
+            if config.get('model', {}).get('invert_valence', False):
+                logger.info("已配置自动反转价值预测 (V轴)")
+                # invert_valence参数会在创建模型时传入
+        
+        # 检查情感象限分布
+        q1_count = sum((train_df[v_col] > 0) & (train_df[a_col] > 0))  # 喜悦/兴奋
+        q2_count = sum((train_df[v_col] > 0) & (train_df[a_col] < 0))  # 满足/平静
+        q3_count = sum((train_df[v_col] < 0) & (train_df[a_col] > 0))  # 愤怒/焦虑
+        q4_count = sum((train_df[v_col] < 0) & (train_df[a_col] < 0))  # 悲伤/抑郁
+        
+        logger.info(f"象限分布: Q1(喜悦)={q1_count}, Q2(满足)={q2_count}, Q3(愤怒)={q3_count}, Q4(悲伤)={q4_count}")
+        
+        # 检查数据不平衡
+        total = len(train_df)
+        min_quadrant = min(q1_count, q2_count, q3_count, q4_count)
+        max_quadrant = max(q1_count, q2_count, q3_count, q4_count)
+        imbalance_ratio = max_quadrant / max(1, min_quadrant)
+        
+        if imbalance_ratio > 3:
+            logger.warning(f"⚠️ 数据严重不平衡! 最大/最小象限比例: {imbalance_ratio:.2f}")
+            logger.info("考虑使用数据平衡策略，如样本权重或上采样")
+            
+        # 数据异常值分析
+        extreme_pos_v = sum(train_df[v_col] > 0.8)
+        extreme_neg_v = sum(train_df[v_col] < -0.8)
+        extreme_pos_a = sum(train_df[a_col] > 0.8)
+        extreme_neg_a = sum(train_df[a_col] < -0.8)
+        
+        logger.info(f"极端值统计: 极正V={extreme_pos_v}, 极负V={extreme_neg_v}, 极高A={extreme_pos_a}, 极低A={extreme_neg_a}")
+        
+        # 检查中性样本数量
+        neutral_count = sum((abs(train_df[v_col]) < 0.2) & (abs(train_df[a_col]) < 0.2))
+        logger.info(f"中性样本数量: {neutral_count} ({(neutral_count/total*100):.2f}%)")
     
     # 创建优化器
     weight_decay = config['training'].get('weight_decay', 0)
@@ -1183,6 +1405,10 @@ def main():
         # 记录CCC指标，作为参考
         logger.info(f"参考CCC: V-CCC={val_metrics['V']['ccc']:.4f} | A-CCC={val_metrics['A']['ccc']:.4f}")
         
+        # 记录象限准确率
+        if 'quadrant_accuracy' in val_metrics:
+            logger.info(f"象限准确率: {val_metrics['quadrant_accuracy']:.4f} | F1-加权: {val_metrics['quadrant_f1_weighted']:.4f}")
+        
         # 更新学习率调度器
         if scheduler is not None and not isinstance(scheduler, optim.lr_scheduler.OneCycleLR):
             if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
@@ -1204,6 +1430,12 @@ def main():
             writer.add_scalar('Metrics/val_v_ccc', val_metrics['V']['ccc'], epoch)
             writer.add_scalar('Metrics/val_a_ccc', val_metrics['A']['ccc'], epoch)
             writer.add_scalar('Metrics/val_avg_ccc', val_metrics['avg_ccc'], epoch)
+            
+            # 记录象限准确率指标
+            if 'quadrant_accuracy' in val_metrics:
+                writer.add_scalar('Metrics/quadrant_accuracy', val_metrics['quadrant_accuracy'], epoch)
+                writer.add_scalar('Metrics/quadrant_f1_weighted', val_metrics['quadrant_f1_weighted'], epoch)
+                writer.add_scalar('Metrics/quadrant_f1_macro', val_metrics['quadrant_f1_macro'], epoch)
             
             # 记录当前学习率
             lr = optimizer.param_groups[0]['lr']
