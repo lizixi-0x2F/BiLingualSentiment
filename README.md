@@ -199,7 +199,33 @@ python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type
 
 ## 推理使用
 
-训练完成后，可以使用`src/inference.py`脚本进行推理：
+### 使用便捷脚本
+
+项目提供了便捷的测试脚本，可以快速测试模型并生成可视化结果：
+
+**Windows (PowerShell)：**
+
+```powershell
+# 单文本推理
+.\test_model.ps1 -SingleText -Text "这是一个测试文本，我感到非常开心！"
+
+# 批量文本推理
+.\test_model.ps1 -InputFile "example_texts.txt" -OutputFile "predictions.csv"
+```
+
+**Linux/macOS (Bash)：**
+
+```bash
+# 单文本推理
+bash ./test_model.sh --single_text --text "这是一个测试文本，我感到非常开心！"
+
+# 批量文本推理
+bash ./test_model.sh --input_file "example_texts.txt" --output_file "predictions.csv"
+```
+
+### 直接使用推理脚本
+
+也可以直接使用`src/inference.py`脚本进行推理：
 
 ```bash
 python src/inference.py `
@@ -207,6 +233,7 @@ python src/inference.py `
     --model_type distilbert `
     --device cuda `
     --text "这是一个测试文本，我感到非常开心！" `
+    --visualize `
     --debug
 ```
 
@@ -218,8 +245,24 @@ python src/inference.py `
     --model_type distilbert `
     --device cuda `
     --input_file example_texts.txt `
-    --output_file predictions.csv
+    --output_file predictions.csv `
+    --visualize
 ```
+
+### 推理参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--model_path` | 模型文件路径 | 必需 |
+| `--model_type` | 模型类型(distilbert/xlm-roberta) | distilbert |
+| `--device` | 计算设备(cuda/cpu/mps) | cuda |
+| `--text` | 单个文本内容进行推理 | 无 |
+| `--input_file` | 批量文本文件路径(.txt或.csv) | 无 |
+| `--output_file` | 结果输出文件路径(.csv) | 无 |
+| `--batch_size` | 批处理大小 | 16 |
+| `--visualize` | 生成可视化结果 | False |
+| `--no_browser` | 不自动打开浏览器查看结果 | False |
+| `--debug` | 显示调试信息 | False |
 
 ## 评估与性能
 
@@ -228,12 +271,38 @@ python src/inference.py `
 - **best_model.pth**：性能最佳的模型权重（基于R²指标）
 - **metrics_epoch_*.json**：每个epoch的详细评估指标
 - **training.log**：训练过程日志
+- **visualizations/**：包含各种可视化结果的目录
 
 ### 主要评估指标
 
 - **R²**：确定系数，越接近1表示模型解释性越强
 - **RMSE**：均方根误差，越小越好
 - **CCC**：一致性相关系数，衡量预测与真实值的一致性
+
+## 可视化功能
+
+本项目提供多种可视化方式帮助理解和分析模型的情感预测结果：
+
+### 训练过程可视化
+
+训练完成后，系统自动生成以下可视化：
+
+- **训练与验证损失曲线**：显示模型在训练过程中的收敛情况
+- **效价-唤醒度散点图**：比较预测值和真实值的分布
+- **预测误差分布图**：可视化预测误差的统计分布
+- **情感分类混淆矩阵**：评估模型在四个情感象限中的分类性能
+- **特征空间可视化**：通过t-SNE降维展示模型学到的高维特征分布
+
+### 推理结果可视化
+
+在推理时使用`--visualize`参数可生成：
+
+- **单个文本**：生成HTML报告，包含详细的情感分析结果和象限图
+- **批量文本**：生成交互式散点图，可通过悬停查看每个文本的详细信息
+
+### 样例可视化
+
+![效价-唤醒度散点图](https://mermaid.ink/img/pako:eNpNj0EOgjAQRa9CM3FhIsaFiQlhQaIJCZG4oYtpGRstSFuaMCF3d6LI7v_vvEySHoyVHdAImhoZ3kgbXGZOCaunKA_qJs2jyXiYZL5oZLSgydLY83t8nCBxU0ZKnUzk--N-k0vAa0dPpQw2F6_SQrBMtDnLaj5iVcKD-iH35Nau6sFEHrtHkhVdSAGdPgfOCC5JkHYrbKBzeG5kAOoV3iCdLeo9nlAdLXTQmk6fF2lCQQ-KGLpfbtNXYQ?type=png) ![情感分类混淆矩阵](https://mermaid.ink/img/pako:eNpNj8sKwjAQRX9lmJWCVF0ILlyISwUFKW7sJiRTG9HEZJIG8eO9VaTOau45L2ZaUEa0IHsQZdfzp5a9dVw2OJbWuBsuHJ9KJRYm9MdlmZle5ZTvRVXdN5dlKHBb0zK2gbEeafiUEeyX3-TCtpvUBLY2VbBH6QduYolbHmLm5VHwCEOPGStA-2MxZZChQTfZrJWryIOM9ZdDHTiaSB5E0ujI5CxYM0i7ipfoLPaVdCB7k1foT5bNX__LlaWF1trO7AO4ilBt?type=png)
 
 ## 排错与优化
 

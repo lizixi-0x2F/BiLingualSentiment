@@ -6,12 +6,16 @@ import numpy as np
 import pandas as pd
 import logging
 from transformers import AutoTokenizer
+import matplotlib.pyplot as plt
+import webbrowser
+from pathlib import Path
 
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import Config
 from src.models.roberta_model import MultilingualDistilBERTModel, XLMRobertaDistilledModel
+from src.utils.visualization import plot_va_scatter, get_html_visualization
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -123,6 +127,9 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', help='设备(cuda/cpu/mps)')
     parser.add_argument('--batch_size', type=int, default=16, help='批次大小')
     parser.add_argument('--text', type=str, help='直接指定要分析的文本')
+    parser.add_argument('--visualize', action='store_true', help='生成预测结果可视化')
+    parser.add_argument('--no_browser', action='store_true', help='不自动打开浏览器查看可视化结果')
+    parser.add_argument('--debug', action='store_true', help='显示调试信息')
     
     args = parser.parse_args()
     
@@ -194,6 +201,9 @@ def main():
     # 进行预测
     logger.info(f"开始预测{len(texts)}个文本的情感...")
     predictions = predict_emotion(model, tokenizer, texts, device, args.batch_size)
+      # 创建可视化目录
+    viz_dir = os.path.join(os.path.dirname(args.model_path), "visualizations")
+    os.makedirs(viz_dir, exist_ok=True)
     
     # 显示结果
     logger.info("预测结果:")
@@ -204,6 +214,48 @@ def main():
     
     if len(texts) > 5:
         logger.info(f"... 等共{len(texts)}个文本")
+    
+    # 可视化预测结果
+    if args.visualize:
+        logger.info("生成情感可视化...")
+        
+        # 仅单个文本的情况，生成HTML报告
+        if len(texts) == 1:
+            # 创建HTML报告
+            html_content = get_html_visualization(predictions[0], texts[0])
+            html_path = os.path.join(viz_dir, "single_prediction_visualization.html")
+            
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            # 自动打开HTML报告
+            logger.info(f"生成的HTML报告位于: {html_path}")
+            if not args.no_browser:
+                webbrowser.open('file://' + os.path.abspath(html_path))
+        
+        # 批量处理的情况，生成散点图
+        else:
+            # 创建静态散点图
+            scatter_path = os.path.join(viz_dir, "predictions_scatter.png")
+            plot_va_scatter(
+                predictions, 
+                title=f"{args.model_type}模型预测分布",
+                output_path=scatter_path
+            )
+            logger.info(f"生成的散点图位于: {scatter_path}")
+            
+            # 创建交互式散点图
+            interactive_path = os.path.join(viz_dir, "predictions_interactive.html")
+            plot_va_scatter(
+                predictions,
+                texts=texts,
+                title=f"{args.model_type}模型预测分布 (交互式)",
+                interactive=True,
+                output_path=interactive_path
+            )
+            logger.info(f"生成的交互式散点图位于: {interactive_path}")
+            if not args.no_browser:
+                webbrowser.open('file://' + os.path.abspath(interactive_path))
     
     # 保存结果
     if args.output_file:

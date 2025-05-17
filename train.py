@@ -7,6 +7,7 @@ import sys
 import time
 import logging
 import json
+import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
@@ -17,6 +18,9 @@ from src.config import Config
 from src.models.roberta_model import MultilingualDistilBERTModel, XLMRobertaDistilledModel
 from src.utils.data_utils import prepare_pretrained_dataloaders
 from src.utils.train_utils import RMSELoss, evaluate, plot_learning_curves, save_metrics, EarlyStopping
+from src.utils.visualization import (plot_va_scatter, plot_prediction_errors, 
+                                    plot_training_progress, plot_feature_embeddings,
+                                    plot_confusion_matrix)
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -309,25 +313,172 @@ def main():
             
         # 学习率调度器步进
         lr_scheduler.step()
-        
+          # 创建可视化目录
+    viz_dir = os.path.join(config.OUTPUT_DIR, "visualizations")
+    os.makedirs(viz_dir, exist_ok=True)
+    
     # 绘制学习曲线
     plot_learning_curves(train_losses, val_losses, config.OUTPUT_DIR)
+    
+    # 绘制训练进度指标
+    train_metrics = {
+        'Train Loss': train_losses,
+        'Validation Loss': val_losses
+    }
+    plot_training_progress(train_metrics, 
+                          title="训练与验证损失", 
+                          output_path=os.path.join(viz_dir, "training_progress.png"))
     
     # 加载最佳模型进行测试
     logger.info("加载最佳模型进行测试评估...")
     checkpoint = torch.load(best_model_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
+      # 在测试集上评估和收集预测结果
+    all_predictions = []
+    all_labels = []
+    all_embeddings = []
+    all_texts = []
     
-    # 在测试集上评估
+    model.eval()
     with torch.no_grad():
-        test_loss, test_metrics = evaluate(model, test_dataloader, criterion, device, args.debug)
-        
+        test_loss = 0
+        for batch in test_dataloader:
+            # 获取输入和标签
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['label'].to(device)
+            texts = batch.get('text', [''] * len(input_ids))
+            
+            # 前向传播
+            if 'token_type_ids' in batch:
+                token_type_ids = batch['token_type_ids'].to(device)
+                outputs = model(input_ids, attention_mask, token_type_ids)
+                
+                # 如果模型有额外输出，可以获取嵌入
+                if isinstance(outputs, tuple) and len(outputs) > 1:
+                    predictions, embeddings = outputs
+                else:
+                    predictions = outputs
+                    # 使用模型的CLS token表示作为嵌入
+                    with torch.no_grad():
+                        if hasattr(model, 'model'):
+                            embeddings = model.model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                token_type_ids=token_type_ids
+                            ).last_hidden_state[:, 0]  # 使用[CLS]标记
+            else:
+                outputs = model(input_ids, attention_mask)
+                
+                # 同上处理嵌入
+                if isinstance(outputs, tuple) and len(outputs) > 1:
+                    predictions, embeddings = outputs
+                else:
+                    predictions = outputs
+                    # 使用模型的CLS token表示作为嵌入
+                    with torch.no_grad():
+                        if hasattr(model, 'model'):
+                            embeddings = model.model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask
+                            ).last_hidden_state[:, 0]  # 使用[CLS]标记
+            
+            # 计算损失
+            loss = criterion(predictions, labels)
+            test_loss += loss.item()
+            
+            # 收集预测、标签、嵌入和文本
+            all_predictions.append(predictions.cpu().numpy())
+            all_labels.append(labels.cpu().numpy())
+            if 'embeddings' in locals():
+                all_embeddings.append(embeddings.cpu().numpy())
+            all_texts.extend(texts)
+    
+    # 计算平均测试损失
+    test_loss /= len(test_dataloader)
+    
+    # 合并所有批次的数据
+    all_predictions = np.vstack(all_predictions)
+    all_labels = np.vstack(all_labels)
+    if all_embeddings:
+        all_embeddings = np.vstack(all_embeddings)
+    
+    # 计算评估指标
+    test_metrics = {}
+    
+    # 计算整体指标
+    from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+    test_metrics['rmse'] = np.sqrt(mean_squared_error(all_labels, all_predictions))
+    test_metrics['r2'] = r2_score(all_labels, all_predictions)
+    test_metrics['mae'] = mean_absolute_error(all_labels, all_predictions)
+    
+    # 计算效价指标
+    test_metrics['valence_rmse'] = np.sqrt(mean_squared_error(all_labels[:, 0], all_predictions[:, 0]))
+    test_metrics['valence_r2'] = r2_score(all_labels[:, 0], all_predictions[:, 0])
+    
+    # 计算唤醒度指标
+    test_metrics['arousal_rmse'] = np.sqrt(mean_squared_error(all_labels[:, 1], all_predictions[:, 1]))
+    test_metrics['arousal_r2'] = r2_score(all_labels[:, 1], all_predictions[:, 1])
+    
     # 输出测试结果
     logger.info("测试集评估结果:")
     logger.info(f"Test Loss: {test_loss:.4f}")
     logger.info(f"Test Metrics - RMSE: {test_metrics['rmse']:.4f}, R²: {test_metrics['r2']:.4f}, MAE: {test_metrics['mae']:.4f}")
     logger.info(f"Valence - RMSE: {test_metrics['valence_rmse']:.4f}, R²: {test_metrics['valence_r2']:.4f}")
     logger.info(f"Arousal - RMSE: {test_metrics['arousal_rmse']:.4f}, R²: {test_metrics['arousal_r2']:.4f}")
+    
+    # 生成可视化
+    logger.info("生成预测可视化...")
+    
+    # 1. 效价-唤醒度散点图 (静态版本)
+    plot_va_scatter(
+        all_predictions, all_labels,
+        title=f"{args.model_type}模型预测分布",
+        output_path=os.path.join(viz_dir, "va_scatter_static.png")
+    )
+    
+    # 2. 效价-唤醒度散点图 (交互式版本，带有文本标签)
+    # 如果有文本信息，则使用文本样本，否则不使用
+    if all_texts and not all(text == '' for text in all_texts):
+        # 只使用一部分样本来避免交互式图表过大
+        sample_size = min(500, len(all_predictions))
+        indices = np.random.choice(len(all_predictions), sample_size, replace=False)
+        
+        plot_va_scatter(
+            all_predictions[indices], all_labels[indices],
+            texts=[all_texts[i] for i in indices],
+            title=f"{args.model_type}模型预测分布 (交互式)",
+            interactive=True,
+            output_path=os.path.join(viz_dir, "va_scatter_interactive.html")
+        )
+    
+    # 3. 预测误差分布图
+    plot_prediction_errors(
+        all_predictions, all_labels,
+        title="预测误差分布",
+        output_path=os.path.join(viz_dir, "prediction_errors.png")
+    )
+    
+    # 4. 情感分类混淆矩阵
+    plot_confusion_matrix(
+        all_predictions, all_labels,
+        title="情感象限预测混淆矩阵",
+        output_path=os.path.join(viz_dir, "confusion_matrix.png")
+    )
+    
+    # 5. 如果有嵌入向量，则可视化特征空间
+    if all_embeddings:
+        # 同样只使用一部分样本来避免t-SNE计算过于耗时
+        sample_size = min(1000, len(all_embeddings))
+        indices = np.random.choice(len(all_embeddings), sample_size, replace=False)
+        
+        plot_feature_embeddings(
+            all_embeddings[indices], all_labels[indices],
+            texts=[all_texts[i] for i in indices] if all_texts else None,
+            title=f"{args.model_type}模型特征空间",
+            interactive=True,
+            output_path=os.path.join(viz_dir, "feature_embeddings.html")
+        )
     
     # 保存测试结果
     test_results = {
