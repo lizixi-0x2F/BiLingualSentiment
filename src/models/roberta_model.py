@@ -38,6 +38,21 @@ class MultilingualDistilBERTModel(nn.Module):
         if hasattr(config, 'FREEZE_LAYERS') and config.FREEZE_LAYERS > 0:
             self._freeze_layers(config.FREEZE_LAYERS)
     
+    def load_from_pretrained(self, model_path):
+        """从本地预训练模型加载权重
+        
+        Args:
+            model_path: 本地预训练模型路径
+        """
+        # 加载本地tokenizer和模型
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.model = AutoModel.from_pretrained(model_path)
+        
+        # 更新隐藏层大小（以防与原始初始化不同）
+        self.hidden_size = self.model.config.hidden_size
+        
+        return self
+    
     def _freeze_layers(self, num_layers):
         """冻结底层以提高训练效率和防止过拟合"""
         # 冻结embedding层
@@ -146,6 +161,21 @@ class XLMRobertaDistilledModel(nn.Module):
         # 可选冻结层
         if hasattr(config, 'FREEZE_LAYERS') and config.FREEZE_LAYERS > 0:
             self._freeze_layers(config.FREEZE_LAYERS)
+    
+    def load_from_pretrained(self, model_path):
+        """从本地预训练模型加载权重
+        
+        Args:
+            model_path: 本地预训练模型路径
+        """
+        # 加载本地tokenizer和模型
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.model = AutoModel.from_pretrained(model_path)
+        
+        # 更新隐藏层大小（以防与原始初始化不同）
+        self.hidden_size = self.model.config.hidden_size
+        
+        return self
     
     def _freeze_layers(self, num_layers):
         """冻结底层以提高训练效率和防止过拟合"""

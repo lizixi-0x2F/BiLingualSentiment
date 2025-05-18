@@ -1,0 +1,7 @@
+{
+    "model_type": "distilbert",
+    "model_path": null,
+    "device": "cuda",
+    "batch_size": 32,
+    "timestamp": "2025-05-18 19:15:31"
+}

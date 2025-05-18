@@ -2,6 +2,10 @@
 
 基于预训练Transformer模型的情感分析系统，用于预测中英文文本的效价(Valence)和唤醒度(Arousal)值。
 
+**✅ 当前状态：已完成微调，模型可用于推理**
+- DistilBERT模型: `outputs/pretrained_distilbert_local/best_model.pth`
+- XLM-RoBERTa模型: `outputs/pretrained_xlm_roberta_local/best_model.pth`
+
 ## 项目概述
 
 本项目实现了一个高效的双语情感分析系统，基于预训练的Transformer模型（DistilBERT和XLM-RoBERTa），可同时处理中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
@@ -164,22 +168,39 @@ python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type
 
 ## 项目结构
 
+详细的项目结构请查看 `PROJECT_STRUCTURE.md`。
+
 ```
 .
-├── run_train.sh               # 训练脚本
-├── train.py                   # 训练实现
-├── README.md                  # 项目文档
-├── requirements.txt           # 依赖列表
+├── shells/                     # 脚本目录
+│   ├── run_train_local_models.ps1  # 本地模型训练脚本(PowerShell)
+│   ├── run_train_local_models.sh   # 本地模型训练脚本(Bash)
+│   ├── test_model.ps1          # 模型测试脚本(PowerShell)
+│   └── test_model.sh           # 模型测试脚本(Bash)
+├── train.py                    # 主训练脚本
+├── train_pretrained.py         # 预训练模型微调脚本
+├── README.md                   # 项目文档
+├── requirements.txt            # 依赖列表
 ├── Chinese_VA_dataset_gaussNoise.csv  # 中文情感数据集
-├── emobank_va_normalized.csv  # 英文情感数据集
-└── src/                       # 源代码
-    ├── config.py              # 配置参数
-    ├── inference.py           # 推理脚本
-    ├── models/                # 模型定义
-    │   └── roberta_model.py   # 预训练模型实现
-    └── utils/                 # 工具函数
-        ├── data_utils.py      # 数据处理
-        └── train_utils.py     # 训练工具
+├── emobank_va_normalized.csv   # 英文情感数据集
+├── outputs/                    # 模型输出目录
+│   ├── pretrained_distilbert_local/  # DistilBERT模型输出
+│   │   ├── best_model.pth      # 最佳模型权重
+│   │   └── test_results.json   # 测试结果
+│   └── pretrained_xlm_roberta_local/ # XLM-RoBERTa模型输出
+│       ├── best_model.pth      # 最佳模型权重
+│       └── test_results.json   # 测试结果
+├── pretrained_models/          # 预训练模型目录
+│   ├── distilbert-multilingual/# DistilBERT预训练模型
+│   └── xlm-roberta-base/       # XLM-RoBERTa预训练模型
+└── src/                        # 源代码
+    ├── config.py               # 配置参数
+    ├── inference.py            # 推理脚本
+    ├── models/                 # 模型定义
+    │   └── roberta_model.py    # 预训练模型实现
+    └── utils/                  # 工具函数
+        ├── data_utils.py       # 数据处理
+        └── train_utils.py      # 训练工具
 ```
 
 ## 关键配置参数
@@ -201,47 +222,61 @@ python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type
 
 ### 使用便捷脚本
 
-项目提供了便捷的测试脚本，可以快速测试模型并生成可视化结果：
+项目提供了便捷的测试脚本，可以快速测试模型并生成可视化结果。脚本会自动查找最新训练的模型（位于`outputs/pretrained_distilbert_local`或`outputs/pretrained_xlm_roberta_local`）：
 
 **Windows (PowerShell)：**
 
 ```powershell
-# 单文本推理
-.\test_model.ps1 -SingleText -Text "这是一个测试文本，我感到非常开心！"
+# 单文本推理 (使用DistilBERT模型)
+.\shells\test_model.ps1 -ModelPath "outputs/pretrained_distilbert_local/best_model.pth" -ModelType "distilbert" -SingleText -Text "这是一个测试文本，我感到非常开心！"
+
+# 单文本推理 (使用XLM-RoBERTa模型)
+.\shells\test_model.ps1 -ModelPath "outputs/pretrained_xlm_roberta_local/best_model.pth" -ModelType "xlm-roberta" -SingleText -Text "这是一个测试文本，我感到非常开心！"
 
 # 批量文本推理
-.\test_model.ps1 -InputFile "example_texts.txt" -OutputFile "predictions.csv"
+.\shells\test_model.ps1 -ModelPath "outputs/pretrained_distilbert_local/best_model.pth" -InputFile "example_texts.txt" -OutputFile "predictions.csv"
 ```
 
 **Linux/macOS (Bash)：**
 
 ```bash
-# 单文本推理
-bash ./test_model.sh --single_text --text "这是一个测试文本，我感到非常开心！"
+# 单文本推理 (使用DistilBERT模型)
+bash ./shells/test_model.sh --model_path "outputs/pretrained_distilbert_local/best_model.pth" --model_type "distilbert" --single_text --text "这是一个测试文本，我感到非常开心！"
+
+# 单文本推理 (使用XLM-RoBERTa模型)
+bash ./shells/test_model.sh --model_path "outputs/pretrained_xlm_roberta_local/best_model.pth" --model_type "xlm-roberta" --single_text --text "这是一个测试文本，我感到非常开心！"
 
 # 批量文本推理
-bash ./test_model.sh --input_file "example_texts.txt" --output_file "predictions.csv"
+bash ./shells/test_model.sh --model_path "outputs/pretrained_distilbert_local/best_model.pth" --input_file "example_texts.txt" --output_file "predictions.csv"
 ```
 
 ### 直接使用推理脚本
 
-也可以直接使用`src/inference.py`脚本进行推理：
+也可以直接使用`src/inference.py`脚本进行推理，使用已经微调的模型：
 
 ```bash
+# 使用DistilBERT模型
 python src/inference.py `
-    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_path outputs/pretrained_distilbert_local/best_model.pth `
     --model_type distilbert `
     --device cuda `
     --text "这是一个测试文本，我感到非常开心！" `
-    --visualize `
-    --debug
+    --visualize
+
+# 使用XLM-RoBERTa模型
+python src/inference.py `
+    --model_path outputs/pretrained_xlm_roberta_local/best_model.pth `
+    --model_type xlm-roberta `
+    --device cuda `
+    --text "这是一个测试文本，我感到非常开心！" `
+    --visualize
 ```
 
 或批量推理文本文件：
 
 ```bash
 python src/inference.py `
-    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_path outputs/pretrained_distilbert_local/best_model.pth `
     --model_type distilbert `
     --device cuda `
     --input_file example_texts.txt `
@@ -270,14 +305,26 @@ python src/inference.py `
 
 - **best_model.pth**：性能最佳的模型权重（基于R²指标）
 - **metrics_epoch_*.json**：每个epoch的详细评估指标
-- **training.log**：训练过程日志
+- **test_results.json**：在测试集上的详细评估结果
 - **visualizations/**：包含各种可视化结果的目录
+
+### 已训练模型位置
+
+微调后的模型保存在以下位置：
+
+1. **DistilBERT多语言模型**: `outputs/pretrained_distilbert_local/best_model.pth`
+   - R²: 0.66
+   - RMSE: 0.21
+
+2. **XLM-RoBERTa模型**: `outputs/pretrained_xlm_roberta_local/best_model.pth`
+   - R²: 0.69
+   - RMSE: 0.20
 
 ### 主要评估指标
 
 - **R²**：确定系数，越接近1表示模型解释性越强
 - **RMSE**：均方根误差，越小越好
-- **CCC**：一致性相关系数，衡量预测与真实值的一致性
+- **MAE**：平均绝对误差，越小越好
 
 ## 可视化功能
 
