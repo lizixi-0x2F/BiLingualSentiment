@@ -2,39 +2,6 @@
 
 基于预训练Transformer模型的情感分析系统，用于预测中英文文本的效价(Valence)和唤醒度(Arousal)值。
 
-**✅ 当前状态：已完成微调，模型可用于推理**
-- DistilBERT模型: `outputs/pretrained_distilbert_local/best_model.pth`
-- XLM-RoBERTa模型: `outputs/pretrained_xlm_roberta_local/best_model.pth`
-
-## Hugging Face 模型
-
-模型已部署在Hugging Face以解决GitHub对大文件的限制：
-
-### 使用模型（用户）
-如果您是用户，请按以下步骤获取模型：
-
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
-
-# 2. 从Hugging Face下载模型
-python download_models_from_hf.py --repo_id YourUsername/bilingual-sentiment-va
-
-# 3. 测试下载的模型
-python test_downloaded_models.py --model_dir downloaded_models --model_type distilbert --text "测试文本"
-```
-
-### 上传模型（开发者）
-如果您是开发者，需要更新Hugging Face上的模型：
-
-```bash
-# 1. 登录Hugging Face（仅首次需要）
-huggingface-cli login
-
-# 2. 上传模型
-python upload_to_huggingface.py --username YourUsername
-```
-
 ## 项目概述
 
 本项目实现了一个高效的双语情感分析系统，基于预训练的Transformer模型（DistilBERT和XLM-RoBERTa），可同时处理中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
