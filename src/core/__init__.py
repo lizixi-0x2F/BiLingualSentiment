@@ -11,6 +11,9 @@ from .wiring import NCPWiring, MultiLevelNCPWiring
 from .model import LTC_NCP_RNN
 from .pos_features import extract_combined_pos_features, preprocess_batch_texts
 from .transformer_branch import XLMRTransformerBranch
+from .linformer_attention import LinformerSelfAttention
+from .linformer_transformer import LinformerEncoderLayer
+from .linformer_mini_transformer import LinformerMiniTransformer
 try:
     from .utils import concordance_correlation_coefficient
 except (ImportError, AttributeError):
@@ -43,5 +46,8 @@ __all__ = [
     'XLMRTransformerBranch',
     'extract_combined_pos_features',
     'preprocess_batch_texts',
-    'concordance_correlation_coefficient'
+    'concordance_correlation_coefficient',
+    'LinformerSelfAttention',
+    'LinformerEncoderLayer',
+    'LinformerMiniTransformer'
 ]
