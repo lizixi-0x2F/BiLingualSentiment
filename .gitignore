@@ -109,19 +109,24 @@ coreml_model/
 *.mlmodel
 *.mlpackage
 
-# # Large model files - use Hugging Face to download these
+# Large model files - use Hugging Face to download these
 pretrained_models/**/*.safetensors
-# pretrained_models/**/*.bin
-# pretrained_models/**/*.pth
-# # Keep model config files
-# !pretrained_models/**/config.json
-# !pretrained_models/**/tokenizer*.json
-# !pretrained_models/**/special_tokens_map.json
-# !pretrained_models/**/vocab.txt
+pretrained_models/**/*.bin
+pretrained_models/**/*.pth
+outputs/**/*.pth
+# Keep model config files
+!pretrained_models/**/config.json
+!pretrained_models/**/tokenizer*.json
+!pretrained_models/**/special_tokens_map.json
+!pretrained_models/**/vocab.txt
 
 # Data
 training_log*.txt
 results/
+
+# Archive and backup directories
+archive/
+cleanup_backup/
 
 # macOS
 .AppleDouble

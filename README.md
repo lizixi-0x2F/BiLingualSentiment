@@ -2,6 +2,13 @@
 
 基于预训练Transformer模型的情感分析系统，用于预测中英文文本的效价(Valence)和唤醒度(Arousal)值。
 
+## Hugging Face 模型
+
+模型已部署在Hugging Face，请使用以下方法获取：
+- 运行 `python scripts/utils/download_models_from_hf.py` 下载模型
+- 运行 `python scripts/utils/test_downloaded_models.py --text "测试文本"` 测试模型
+- 要上传自己的模型：`python scripts/utils/upload_to_huggingface.py --username YourUsername`
+
 ## 项目概述
 
 本项目实现了一个高效的双语情感分析系统，基于预训练的Transformer模型（DistilBERT和XLM-RoBERTa），可同时处理中文和英文文本，输出情感的效价(Valence，表示情感正负程度)和唤醒度(Arousal，表示情感强度)值，范围在[-1, 1]之间。
@@ -111,7 +118,7 @@ PretrainedSentimentModel
 运行预训练模型训练脚本：
 
 ```bash
-./run_train.sh
+./scripts/training/run_train.sh
 ```
 
 ### 自定义训练
@@ -120,10 +127,10 @@ PretrainedSentimentModel
 
 ```bash
 # 编辑脚本中的参数
-notepad run_train.sh
+notepad scripts/training/run_train.sh
 
 # 或手动运行训练脚本指定参数
-python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type distilbert --monitor r2
+python scripts/training/train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type distilbert --monitor r2
 ```
 
 ### 参数说明
@@ -166,20 +173,38 @@ python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type
 
 ```
 .
-├── run_train.sh               # 训练脚本
-├── train.py                   # 训练实现
-├── README.md                  # 项目文档
-├── requirements.txt           # 依赖列表
-├── Chinese_VA_dataset_gaussNoise.csv  # 中文情感数据集
-├── emobank_va_normalized.csv  # 英文情感数据集
-└── src/                       # 源代码
-    ├── config.py              # 配置参数
-    ├── inference.py           # 推理脚本
-    ├── models/                # 模型定义
-    │   └── roberta_model.py   # 预训练模型实现
-    └── utils/                 # 工具函数
-        ├── data_utils.py      # 数据处理
-        └── train_utils.py     # 训练工具
+├── data/                         # 数据文件
+│   ├── Chinese_VA_dataset_gaussNoise.csv  # 中文情感数据集
+│   ├── emobank_va_normalized.csv  # 英文情感数据集
+│   └── example_texts.txt         # 示例文本
+├── docs/                         # 文档
+│   ├── GITHUB_SETUP.md           # GitHub设置指南
+│   ├── WORKFLOW.md               # 工作流程文档
+│   └── PROJECT_STRUCTURE.md      # 项目结构详细说明
+├── scripts/                      # 脚本文件
+│   ├── inference/                # 推理相关脚本
+│   │   ├── interactive_test.py   # 交互式测试脚本
+│   │   ├── inference_ensemble.py # 集成推理脚本
+│   │   ├── test_model.ps1        # Windows测试脚本
+│   │   └── test_model.sh         # Linux/macOS测试脚本
+│   ├── training/                 # 训练相关脚本
+│   │   ├── train.py              # 训练主脚本
+│   │   ├── train_amp.py          # 混合精度训练脚本
+│   │   └── run_train.sh          # 训练执行脚本
+│   └── utils/                    # 工具脚本
+│       ├── download_models_from_hf.py  # 从HF下载模型
+│       ├── upload_to_huggingface.py    # 上传模型到HF
+│       └── test_downloaded_models.py   # 测试下载的模型
+├── src/                          # 源代码
+│   ├── config.py                 # 配置参数
+│   ├── inference.py              # 推理实现
+│   ├── models/                   # 模型定义
+│   │   └── roberta_model.py      # 预训练模型实现
+│   └── utils/                    # 工具函数
+│       ├── data_utils.py         # 数据处理
+│       └── train_utils.py        # 训练工具
+├── README.md                     # 项目文档
+└── requirements.txt              # 依赖列表
 ```
 
 ## 关键配置参数
@@ -207,20 +232,20 @@ python train.py --device cuda --batch_size 32 --epochs 20 --lr 2e-5 --model_type
 
 ```powershell
 # 单文本推理
-.\test_model.ps1 -SingleText -Text "这是一个测试文本，我感到非常开心！"
+.\scripts\inference\test_model.ps1 -SingleText -Text "这是一个测试文本，我感到非常开心！"
 
 # 批量文本推理
-.\test_model.ps1 -InputFile "example_texts.txt" -OutputFile "predictions.csv"
+.\scripts\inference\test_model.ps1 -InputFile "data\example_texts.txt" -OutputFile "predictions.csv"
 ```
 
 **Linux/macOS (Bash)：**
 
 ```bash
 # 单文本推理
-bash ./test_model.sh --single_text --text "这是一个测试文本，我感到非常开心！"
+bash ./scripts/inference/test_model.sh --single_text --text "这是一个测试文本，我感到非常开心！"
 
 # 批量文本推理
-bash ./test_model.sh --input_file "example_texts.txt" --output_file "predictions.csv"
+bash ./scripts/inference/test_model.sh --input_file "data/example_texts.txt" --output_file "predictions.csv"
 ```
 
 ### 直接使用推理脚本
@@ -229,7 +254,7 @@ bash ./test_model.sh --input_file "example_texts.txt" --output_file "predictions
 
 ```bash
 python src/inference.py `
-    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_path outputs/pretrained_distilbert_local/best_model.pth `
     --model_type distilbert `
     --device cuda `
     --text "这是一个测试文本，我感到非常开心！" `
@@ -241,10 +266,10 @@ python src/inference.py `
 
 ```bash
 python src/inference.py `
-    --model_path outputs/pretrained_distilbert_XXXXXXXX_XXXXXX/best_model.pth `
+    --model_path outputs/pretrained_distilbert_local/best_model.pth `
     --model_type distilbert `
     --device cuda `
-    --input_file example_texts.txt `
+    --input_file data/example_texts.txt `
     --output_file predictions.csv `
     --visualize
 ```
@@ -337,6 +362,31 @@ python src/inference.py `
 - 心理健康文本分析
 - 内容推荐系统
 - 跨语言情感分析
+
+## 项目验证和设置
+
+本项目提供了验证脚本以确保环境和文件结构设置正确：
+
+```bash
+# Windows 用户
+.\verify_project.bat
+
+# 或直接运行 Python 脚本
+python scripts/utils/verify_setup.py
+```
+
+此脚本会检查：
+- 所需依赖项的安装状态
+- 目录结构是否完整
+- 数据文件是否存在
+- 模型文件是否存在或需要下载
+- 尝试运行简单的模型推理测试
+
+如果发现缺少模型文件，可以使用以下命令从Hugging Face下载：
+
+```bash
+python scripts/utils/download_models_from_hf.py
+```
 
 ## 开发者
 
