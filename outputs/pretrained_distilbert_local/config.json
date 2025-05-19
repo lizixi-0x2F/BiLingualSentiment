@@ -1,0 +1,13 @@
+{
+  "model_type": "distilbert",
+  "model_name": "distilbert-base-multilingual-cased",
+  "local_model_path": "pretrained_models\\distilbert-multilingual",
+  "device": "cuda",
+  "batch_size": 32,
+  "epochs": 10,
+  "learning_rate": 3e-05,
+  "weight_decay": 0.01,
+  "monitor": "r2",
+  "patience": 3,
+  "timestamp": "20250519_003354"
+}

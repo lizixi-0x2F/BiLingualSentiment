@@ -1,0 +1,13 @@
+{
+  "model_type": "xlm-roberta",
+  "model_name": "xlm-roberta-base",
+  "local_model_path": "pretrained_models\\xlm-roberta-base",
+  "device": "cuda",
+  "batch_size": 32,
+  "epochs": 10,
+  "learning_rate": 2e-05,
+  "weight_decay": 0.01,
+  "monitor": "r2",
+  "patience": 3,
+  "timestamp": "20250519_004018"
+}
