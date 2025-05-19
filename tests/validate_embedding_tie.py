@@ -12,7 +12,8 @@ import torch.nn as nn
 from transformers import XLMRobertaModel
 
 # 添加项目路径到sys.path确保可以导入
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 # 导入transformer_branch或直接复制类定义到此处
 try:
