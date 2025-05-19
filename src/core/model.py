@@ -773,11 +773,11 @@ class LTC_NCP_RNN(nn.Module):
                   # 打印门控平均值 - 始终打印而不是仅调试模式
                 gate_mean = fusion_gate.mean().item()
                 print(f"融合门控平均值: {gate_mean:.4f}")
-                
-                # 确保门控形状与输出匹配 - 同时验证两个输入的形状
+                  # 确保门控形状与输出匹配 - 同时验证两个输入的形状
                 assert fusion_gate.shape == transformed_out.shape, f"门控形状 {fusion_gate.shape} 与Transformer输出形状 {transformed_out.shape} 不匹配"
                 assert fusion_gate.shape == ltc_ncp_out.shape, f"门控形状 {fusion_gate.shape} 与LTC-NCP输出形状 {ltc_ncp_out.shape} 不匹配"
-                print(f"形状验证通过: 门控形状 {fusion_gate.shape} 与输入输出匹配")
+                if DEBUG:
+                    print(f"形状验证通过: 门控形状 {fusion_gate.shape} 与输入输出匹配")
                 
                 # 4. 使用门控值融合两个输出
                 combined_out = fusion_gate * transformed_out + (1 - fusion_gate) * ltc_ncp_out
@@ -832,18 +832,25 @@ class LTC_NCP_RNN(nn.Module):
         
         # 确保维度匹配 - 如果不匹配，进行调整
         if final_hidden.size(1) != self.total_input_size:
-            print(f"警告: 输入维度不匹配 ({final_hidden.size(1)} vs {self.total_input_size})，调整中...")
+            if DEBUG:
+                print(f"信息: 输入维度调整 ({final_hidden.size(1)} -> {self.total_input_size})，正在自动处理...")
+            else:
+                # 在非调试模式下使用更简洁的消息
+                print(f"维度自动适配: {final_hidden.size(1)} -> {self.total_input_size}")
+                
             if final_hidden.size(1) > self.total_input_size:
                 # 截断多余维度
                 final_hidden = final_hidden[:, :self.total_input_size]
-                print(f"已裁剪维度至: {final_hidden.size(1)}")
+                if DEBUG:
+                    print(f"已裁剪维度至: {final_hidden.size(1)}")
             else:
                 # 填充不足的维度
                 padding = torch.zeros(final_hidden.size(0), 
                                      self.total_input_size - final_hidden.size(1),
                                      device=final_hidden.device)
                 final_hidden = torch.cat([final_hidden, padding], dim=1)
-                print(f"已填充维度至: {final_hidden.size(1)}")
+                if DEBUG:
+                    print(f"已填充维度至: {final_hidden.size(1)}")
           # 使用预定义的输入适配器处理维度
         try:
             final_hidden = self.input_adapter(final_hidden)
