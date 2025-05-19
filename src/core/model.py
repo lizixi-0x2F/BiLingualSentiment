@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 from .cells import LTCCell
 from .wiring import NCPWiring, MultiLevelNCPWiring
+from .modules.moe import MoE
 
 # 全局调试标志，设为True启用调试输出
 DEBUG = True
@@ -235,7 +236,6 @@ class LTC_NCP_RNN(nn.Module):
     用于文本情感价效度回归，支持双语输入
     增加了四象限分类辅助任务头
     """
-    
     def __init__(self, 
                 vocab_size: int,
                 embedding_dim: int,
@@ -248,10 +248,12 @@ class LTC_NCP_RNN(nn.Module):
                 use_meta_features: bool = True,
                 bidirectional: bool = False,
                 padding_idx: Optional[int] = None,
-                wiring_type: str = 'structured',  # 新增：连接类型                multi_level: bool = False,        # 是否使用多层次连接
+                wiring_type: str = 'structured',  # 新增：连接类型                
+                multi_level: bool = False,        # 是否使用多层次连接
                 emotion_focused: bool = False,    # 情感感知连接
                 heterogeneous: bool = False,      # 异构连接密度
                 use_transformer: bool = False,    # 是否使用Transformer
+                use_moe: bool = False,            # 是否使用Mixture of Experts
                 invert_valence: bool = False,     # 是否反转价值预测
                 invert_arousal: bool = False,     # 是否反转效度预测
                 enhance_valence: bool = False,    # 是否增强价值预测能力
@@ -370,8 +372,7 @@ class LTC_NCP_RNN(nn.Module):
         
         # 添加特征维度转换层 - 新增，解决维度不匹配问题
         self.feature_adapter = nn.Linear(hidden_output_size, hidden_output_size)
-        
-        # 添加Transformer模块
+          # 添加Transformer模块
         if use_transformer:
             self.transformer = MiniTransformer(
                 d_model=hidden_output_size,
@@ -383,6 +384,18 @@ class LTC_NCP_RNN(nn.Module):
             
             # 添加Transformer输出适配层 - 新增，保持维度一致性
             self.transformer_adapter = nn.Linear(hidden_output_size, hidden_output_size)
+        
+        # 添加Mixture of Experts模块
+        self.use_moe = use_moe
+        if use_moe:
+            self.moe = MoE(
+                input_dim=hidden_output_size,
+                output_dim=hidden_output_size,
+                num_experts=4,
+                k=2,
+                expert_hidden_dim=hidden_output_size*2,
+                dropout=dropout/2
+            )
         
         # 如果使用元特征，增加输入维度
         self.meta_feature_size = 0
@@ -801,8 +814,7 @@ class LTC_NCP_RNN(nn.Module):
                                      device=final_hidden.device)
                 final_hidden = torch.cat([final_hidden, padding], dim=1)
                 print(f"已填充维度至: {final_hidden.size(1)}")
-        
-        # 使用预定义的输入适配器处理维度
+          # 使用预定义的输入适配器处理维度
         try:
             final_hidden = self.input_adapter(final_hidden)
             debug_print(f"应用输入适配器后维度: {final_hidden.shape}")
@@ -810,6 +822,34 @@ class LTC_NCP_RNN(nn.Module):
             print(f"输入适配器错误: {e}，输入维度: {final_hidden.shape}")
             # 创建紧急备用
             final_hidden = torch.zeros(final_hidden.size(0), self.hidden_size, device=final_hidden.device)
+        
+        # 应用Mixture of Experts层（如果启用）
+        if self.use_moe:
+            try:
+                # 确保数据类型匹配
+                final_hidden = final_hidden.to(torch.float32)
+                
+                # 应用MoE处理
+                debug_print(f"MoE输入形状: {final_hidden.shape}")
+                moe_out = self.moe(final_hidden)
+                
+                # 检查MoE输出
+                debug_print(f"MoE输出形状: {moe_out.shape}")
+                
+                # 检查MoE输出是否有NaN
+                if torch.isnan(moe_out).any():
+                    print("警告: MoE输出包含NaN值，回退到原始输出") if DEBUG else None
+                    moe_out = final_hidden
+                final_hidden = moe_out
+                
+                # 如果是调试模式，输出专家使用情况
+                if DEBUG:
+                    _, expert_usage, load_balancing = self.moe.get_routing_stats(final_hidden)
+                    debug_print(f"MoE专家使用情况: {expert_usage.tolist()}, 负载均衡: {load_balancing:.4f}")
+                
+            except Exception as e:
+                print(f"警告: MoE层出错，回退到原始输出: {e}")
+                # 保持final_hidden不变
         
         # 8. 通过共享基础层
         try:
