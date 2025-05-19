@@ -28,10 +28,20 @@ LTC-NCP-VA是一个专注于文本情感价效度(Valence-Arousal)分析的深�
 - **细粒度情感**: 不仅分析情感极性，还能识别情感强度和激烈程度
 - **LTC神经网络**: 基于液态时间常数的递归神经网络，适合处理时序信息
 - **NCP稀疏连接**: 使用神经电路策略实现高效稀疏连接，提高泛化能力
-- **先进增强技术**: 
-  - **FGM对抗训练**: 通过向嵌入层添加扰动增强模型鲁棒性
-  - **边界样本权重**: 对VA空间中的边界样本给予更高权重，提高区分能力
-  - **VA多任务学习**: 联合优化VA回归与四象限分类，提高预测准确性
+
+**完整版额外功能**:
+- **对抗训练**: 通过FGM添加扰动提高模型鲁棒性
+- **软标签**: 标签平滑技术提高模型泛化能力
+- **多任务学习**: 结合四象限分类辅助任务提升性能
+- **边界样本权重**: 对VA空间中的边界样本给予更高权重，提高区分能力
+
+## 版本说明
+
+本项目提供两个版本:
+
+1. **完整版**: 包含所有高级功能，如对抗训练、软标签和多任务学习
+2. **简化版**: 移除了复杂功能，更易于理解和使用
+   - 查看 [简化指南](docs/SIMPLIFICATION_GUIDE.md) 了解详情
 
 ## 模型架构
 
@@ -40,9 +50,8 @@ LTC-NCP-RNN模型结合了多项先进技术：
 1. **液态时间常数(LTC)细胞**: 一种改进的RNN单元，通过可学习的时间常数处理不同时间尺度的依赖关系
 2. **神经电路策略(NCP)布线**: 基于神经科学的稀疏连接方案，降低参数量，提高泛化能力
 3. **分支架构**: 专门的V分支和A分支分别处理价值和效度预测
-4. **多任务学习**: 同时进行VA回归和四象限分类，互相促进性能提升
-5. **注意力机制**: 引入注意力层突出重要特征
-6. **情感方向感知**: 特殊设计的损失函数，对情感象限预测错误施加更高惩罚
+4. **注意力机制**: 引入注意力层突出重要特征
+5. **情感方向感知**: 特殊设计的损失函数，对情感象限预测错误施加更高惩罚
 
 ## 安装与设置
 
@@ -75,12 +84,26 @@ pip install -r requirements.txt
 
 ### 训练模型
 
-使用标准配置训练模型：
+#### 简化版训练 (推荐新用户)
+
+Windows用户：
 ```bash
-python src/train.py --config configs/valence_enhanced.yaml
+.\scripts\run_simple_train.ps1
 ```
 
-使用FGM对抗训练和VA多任务学习：
+Linux/Mac用户：
+```bash
+bash ./scripts/run_simple_train.sh
+```
+
+或手动启动简化版训练：
+```bash
+python src/train_simple.py --config configs/simple_base.yaml
+```
+
+#### 完整版训练 (高级功能)
+
+使用所有高级功能 (对抗训练、软标签和多任务学习)：
 ```bash
 python src/train.py --config configs/valence_enhanced.yaml --epochs 50
 ```
@@ -92,7 +115,12 @@ python src/train.py --config configs/valence_enhanced.yaml --epochs 50
 
 ### 评估模型
 
-在测试集上评估模型性能：
+#### 简化版评估
+```bash
+python src/evaluate_simple.py --ckpt results/simple_base/best_model.pt
+```
+
+#### 完整版评估
 ```bash
 python src/evaluate.py --ckpt runs/models/best_model.pt --output results/evaluation
 ```
@@ -117,11 +145,11 @@ python src/emotion_predict.py
 │   ├── core/               # 核心模型实现
 │   │   ├── cells.py        # LTC细胞实现
 │   │   ├── wiring.py       # NCP布线实现
-│   │   ├── model.py        # LTC-NCP-RNN模型定义
-│   │   ├── adversarial.py  # FGM对抗训练
-│   │   └── boundary_weights.py # 边界样本权重
-│   ├── train.py            # 训练脚本
-│   ├── evaluate.py         # 评估脚本
+│   │   └── model.py        # LTC-NCP-RNN模型定义
+│   ├── train.py            # 完整版训练脚本
+│   ├── train_simple.py     # 简化版训练脚本
+│   ├── evaluate.py         # 完整版评估脚本
+│   ├── evaluate_simple.py  # 简化版评估脚本
 │   └── emotion_predict.py  # 情感预测脚本
 ├── scripts/                # 辅助脚本
 ├── data/                   # 数据目录

@@ -1,0 +1,116 @@
+# LTC-NCP-VA 简化基础配置
+# 移除高级功能：FGM对抗训练、软标签、多任务学习头
+
+# 数据配置
+data:
+  train_path: "data/processed_clean/merged_train_clean.csv"
+  val_path: "data/processed_clean/merged_val_clean.csv"
+  text_col: "text"
+  v_col: "V"
+  a_col: "A"
+  meta_features:
+    - "text_length"
+    - "punct_density"
+    - "sentence_count"
+  max_length: 150
+  use_meta_features: true
+  use_pos_features: false
+  analyze_before_training: false
+  confirm_training: false
+  
+# 模型配置
+model:
+  type: "ltc_ncp"
+  embedding_dim: 256
+  hidden_size: 128
+  dropout: 0.3
+  sparsity_level: 0.5
+  dt: 0.1
+  integration_method: "euler"
+  bidirectional: true
+  enhance_valence: false
+  wiring_type: "structured"
+  multi_level: false
+  emotion_focused: false
+  heterogeneous: false
+  use_transformer: false
+  use_quadrant_head: false
+  invert_valence: false
+  invert_arousal: false
+  
+# 训练配置
+training:
+  epochs: 30
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  clip_grad_norm: 1.0
+  scheduler:
+    type: "cosine"
+    warmup_epochs: 2
+  optimizer: "adam"
+  use_amp: true
+  seed: 42
+  patience: 10
+  
+# 优化技术 - 全部禁用高级功能
+optimization:
+  label_smoothing: 0.0
+  mixup_alpha: 0.0
+  gradient_accumulation_steps: 1
+  freeze_embedding_epochs: 0
+  use_mse_ccc_loss: false
+  freeze_a_head_epochs: 0
+  use_adversarial: false
+  use_boundary_weights: false
+  
+# 损失函数设置
+loss:
+  mse_weight: 1.0
+  ccc_weight: 0.0
+  use_direction_loss: false
+  direction_weight: 0.0
+  valence_weight: 1.0
+  sign_weight: 0.0
+
+# 评估配置
+evaluation:
+  metrics:
+    - "mse"
+    - "rmse"
+    - "mae"
+    - "ccc"
+    - "spearman"
+    - "pearson"
+  best_metric: "rmse"
+  higher_better: false
+  patience: 10
+  
+# 日志和存储
+logging:
+  log_dir: "runs/simple_base"
+  log_every: 10
+  save_model: true
+  tensorboard: true
+  save_dir: "runs/simple_base"
+  save_checkpoints: true
+  checkpoints_interval: 5
+  log_interval: 10
+  
+# 硬件设置
+hardware:
+  device: "cuda" 
+  seed: 42
+  num_workers: 4
+  precision: "mixed"
+  
+# 可视化设置
+visualization:
+  enabled: true
+  n_samples: 100
+  output_dir: "results/plots/simple_base"
+  confusion_matrix: false
+  attention_maps: false
+
+# 输出目录设置
+output_dir: "results/simple_base"

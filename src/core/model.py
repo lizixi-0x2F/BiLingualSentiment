@@ -248,17 +248,16 @@ class LTC_NCP_RNN(nn.Module):
                 use_meta_features: bool = True,
                 bidirectional: bool = False,
                 padding_idx: Optional[int] = None,
-                wiring_type: str = 'structured',  # 新增：连接类型
-                multi_level: bool = True,         # 新增：是否使用多层次连接
-                emotion_focused: bool = True,     # 新增：情感感知连接
-                heterogeneous: bool = True,       # 新增：异构连接密度
-                use_transformer: bool = False,    # 新增：是否使用Transformer
-                invert_valence: bool = False,     # 新增：是否反转价值预测
-                invert_arousal: bool = False,     # 新增：是否反转效度预测
-                enhance_valence: bool = False,    # 新增：是否增强价值预测能力
-                valence_layers: int = 2,          # 新增：价值分支的额外层数
-                use_quadrant_head: bool = True,   # 新增：是否使用四象限分类头
-                quadrant_weight: float = 0.3,     # 新增：四象限分类损失权重
+                wiring_type: str = 'structured',  # 新增：连接类型                multi_level: bool = False,        # 是否使用多层次连接
+                emotion_focused: bool = False,    # 情感感知连接
+                heterogeneous: bool = False,      # 异构连接密度
+                use_transformer: bool = False,    # 是否使用Transformer
+                invert_valence: bool = False,     # 是否反转价值预测
+                invert_arousal: bool = False,     # 是否反转效度预测
+                enhance_valence: bool = False,    # 是否增强价值预测能力
+                valence_layers: int = 1,          # 价值分支的额外层数
+                use_quadrant_head: bool = False,  # 是否使用四象限分类头
+                quadrant_weight: float = 0.0,     # 四象限分类损失权重
                 **kwargs                          # 新增：接受任意关键字参数
                ):
         """
@@ -527,19 +526,7 @@ class LTC_NCP_RNN(nn.Module):
             nn.Linear(hidden_size, 1),
             nn.Sigmoid()
         )
-        
-        # 6. 新增：四象限分类头 - 直接预测四个象限类别
-        if use_quadrant_head:
-            self.quadrant_head = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_size, hidden_size // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout/2),
-                nn.Linear(hidden_size // 2, 4)  # 输出4个象限类别的logits
-            )
-            print(f"创建四象限分类辅助任务头，输入维度: {hidden_size}，权重: {quadrant_weight}")
+          # 四象限分类头已移除
     
     def _process_sequence(self, embedded, mask=None):
         """处理序列的正向传播"""
@@ -935,26 +922,8 @@ class LTC_NCP_RNN(nn.Module):
                 outputs_clone[:, 1] = -outputs[:, 1]  # 反转效度维度
                 
             outputs = outputs_clone
-        
-        # 新增：四象限分类预测
-        quadrant_logits = None
-        if self.use_quadrant_head:
-            try:
-                quadrant_logits = self.quadrant_head(shared_features)
-                
-                # 检查是否有NaN值
-                if torch.isnan(quadrant_logits).any():
-                    print("警告: 四象限分类输出包含NaN值，使用0替换") if DEBUG else None
-                    quadrant_logits = torch.nan_to_num(quadrant_logits, nan=0.0)
-            except Exception as e:
-                print(f"警告: 四象限分类头处理出错: {e}")
-                quadrant_logits = torch.zeros(final_hidden.size(0), 4, device=final_hidden.device)
-        
-        # 返回VA回归输出和四象限分类预测
-        if self.use_quadrant_head:
-            return outputs, quadrant_logits
-        else:
-            return outputs
+          # 直接返回VA回归输出，不包含四象限分类预测
+        return outputs
     
     def get_stats(self):
         """获取模型统计信息"""
@@ -966,10 +935,7 @@ class LTC_NCP_RNN(nn.Module):
             'interaction_norm': sum(p.norm().item() for p in self.emotion_interaction.parameters()),
             'attention_norm': sum(p.norm().item() for p in self.attention.parameters())
         }
-        
-        # 添加四象限分类头统计
-        if self.use_quadrant_head:
-            stats['quadrant_head_norm'] = sum(p.norm().item() for p in self.quadrant_head.parameters())
+          # 四象限分类头已移除
         
         # 添加LTC细胞统计
         if self.multi_level:

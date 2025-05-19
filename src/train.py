@@ -4,8 +4,7 @@
 """
 LTC-NCP-VA 训练脚本
 适用于中英双语情感价效度回归任务
-增强版: 支持高级优化技术
-新增: FGM对抗训练、边界样本权重、VA多任务联合优化
+简化版本: 移除高级功能
 """
 
 import os
@@ -31,9 +30,6 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.amp import autocast, GradScaler
 
 from src.core import LTC_NCP_RNN
-# 导入新增的对抗训练和边界样本权重模块
-from src.core.adversarial import FGM
-from src.core.boundary_weights import BoundarySampleWeighter
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr, pearsonr
 
@@ -143,22 +139,7 @@ def add_sentence_count(df, text_col="text"):
     )
     return df
 
-class LabelSmoothingLoss(nn.Module):
-    """带标签平滑的MSE损失"""
-    def __init__(self, smoothing=0.1):
-        super(LabelSmoothingLoss, self).__init__()
-        self.smoothing = smoothing
-        self.mse = nn.MSELoss()
-        
-    def forward(self, predictions, targets):
-        # 处理四象限分类头的输出元组
-        if isinstance(predictions, tuple) and len(predictions) == 2:
-            # 如果是(va_pred, quadrant_logits)元组，只取va_pred部分
-            predictions = predictions[0]
-        
-        # 在[-1,1]范围内应用标签平滑
-        smoothed_targets = targets * (1 - self.smoothing) + 0 * self.smoothing
-        return self.mse(predictions, smoothed_targets)
+# 标准MSE损失函数，移除了标签平滑
 
 class MSE_CCC_Loss(nn.Module):
     """结合MSE和CCC的损失函数"""
@@ -247,198 +228,9 @@ class EmotionDirectionLoss(nn.Module):
         return total_loss
 
 
-class QuadrantClassificationLoss(nn.Module):
-    """
-    四象限分类辅助任务与VA回归的联合损失函数
-    结合MSE回归损失、CCC损失、交叉熵分类损失和符号损失
-    
-    参数:
-        base_loss: 基础VA回归损失函数
-        quadrant_weight: 四象限分类损失权重
-        ccc_weight: CCC损失权重
-        sign_weight: 符号损失权重
-        dynamic_weight: 是否动态调整权重
-    """
-    def __init__(self, base_loss=nn.MSELoss(), quadrant_weight=0.5, ccc_weight=0.3, sign_weight=0.2, dynamic_weight=True):
-        super(QuadrantClassificationLoss, self).__init__()
-        self.base_loss = base_loss
-        self.quadrant_weight = quadrant_weight
-        self.initial_quadrant_weight = quadrant_weight  # 保存初始权重用于动态调整
-        self.ccc_weight = ccc_weight
-        self.sign_weight = sign_weight
-        self.dynamic_weight = dynamic_weight
-        
-        # 交叉熵损失函数，用于四象限分类
-        self.ce_loss = nn.CrossEntropyLoss()
-        
-        # 创建BCEWithLogitsLoss用于符号损失
-        self.bce_loss = nn.BCEWithLogitsLoss()
-        
-        # 创建类别权重 - 初始权重相等
-        self.class_weights = torch.ones(4)
-        
-        # 记录训练进度，用于动态调整
-        self.epoch = 0
-        self.train_steps = 0
-        self.recent_losses = []
-        
-        # 跟踪样本在各象限的分布
-        self.quadrant_counts = torch.zeros(4)
-        
-        # 记录最近的性能，用于动态调整
-        self.va_mse_history = []
-        self.quad_acc_history = []
-        
-        # 记录损失详情
-        self.loss_details = {
-            'va_mse': 0,
-            'quadrant_ce': 0,
-            'ccc': 0,
-            'sign': 0
-        }
-        
-        # 记录各种指标
-        self.last_metrics = {
-            'quadrant_accuracy': 0.0,
-            'quad_f1': 0.0,
-            'ccc_v': 0.0,
-            'ccc_a': 0.0
-        }
-        
-        # 记录各部分损失值
-        self.last_losses = {
-            'regression': 0.0,
-            'classification': 0.0,
-            'ccc': 0.0,
-            'sign': 0.0,
-            'total': 0.0
-        }
-    
-    def update_class_weights(self, targets):
-        """更新类别权重，平衡稀有象限"""
-        # 计算目标四象限
-        target_v, target_a = targets[:, 0], targets[:, 1]
-        
-        # 使用V和A的符号确定象限
-        target_quadrant = torch.zeros(len(target_v), dtype=torch.long, device=targets.device)
-        target_quadrant[(target_v >= 0) & (target_a >= 0)] = 0  # 第一象限
-        target_quadrant[(target_v >= 0) & (target_a < 0)] = 1   # 第二象限
-        target_quadrant[(target_v < 0) & (target_a >= 0)] = 2   # 第三象限
-        target_quadrant[(target_v < 0) & (target_a < 0)] = 3    # 第四象限
-        
-        # 计算每个象限的样本数
-        class_counts = torch.bincount(target_quadrant, minlength=4).float()
-        
-        # 确保没有零计数
-        class_counts = torch.max(class_counts, torch.ones_like(class_counts))
-        
-        # 计算权重为类别频率的倒数的平方根
-        self.class_weights = 1.0 / torch.sqrt(class_counts)
-        
-        # 归一化权重使其和为4（平均每个类别权重为1）
-        self.class_weights = self.class_weights * (4.0 / self.class_weights.sum())
-        
-        # 移动权重到正确的设备
-        self.class_weights = self.class_weights.to(targets.device)
-        
-        # 更新CrossEntropyLoss
-        self.ce_loss = nn.CrossEntropyLoss(weight=self.class_weights)
-        
-        return target_quadrant
-    
-    def calculate_ccc_loss(self, va_pred, targets):
-        """计算CCC损失"""
-        # 分别计算V和A的CCC
-        v_ccc = concordance_correlation_coefficient(va_pred[:, 0], targets[:, 0])
-        a_ccc = concordance_correlation_coefficient(va_pred[:, 1], targets[:, 1])
-        
-        # 保存CCC指标
-        self.last_metrics['ccc_v'] = v_ccc
-        self.last_metrics['ccc_a'] = a_ccc
-        
-        # 计算CCC损失 (1 - CCC)
-        ccc_loss = 2.0 - (v_ccc + a_ccc)  # 范围[0, 2]
-        
-        return ccc_loss, v_ccc, a_ccc
-    
-    def calculate_sign_loss(self, va_pred, targets):
-        """计算符号损失 - 惩罚VA符号预测错误"""
-        # V轴符号预测 - 转换为概率形式的二分类问题
-        target_v_sign = ((targets[:, 0] >= 0).float() * 2 - 1).unsqueeze(1)  # 映射到[-1, 1]
-        v_sign = va_pred[:, 0].unsqueeze(1)  # 使用原始V值作为logits
-        
-        # 计算符号一致性损失 - 使用BCEWithLogitsLoss
-        # 添加小偏移量，防止恰好为0的情况
-        sign_loss = self.bce_loss(v_sign + 0.05, (target_v_sign + 1) / 2)  # 将[-1,1]映射到[0,1]
-        
-        return sign_loss
-    
-    def adjust_weights(self):
-        """根据性能指标动态调整权重"""
-        if not self.dynamic_weight:
-            return
-            
-        # 如果准确率低于阈值，增加四象限损失权重
-        if self.last_metrics['quadrant_accuracy'] < 0.5:
-            self.quadrant_weight = min(0.8, self.quadrant_weight * 1.05)
-        else:
-            # 逐渐恢复到初始权重
-            self.quadrant_weight = max(self.initial_quadrant_weight, 
-                                       self.quadrant_weight * 0.98)
-    
-    def forward(self, outputs, targets):
-        """
-        计算联合损失
-        
-        参数:
-            outputs: 模型输出，包含(va_pred, quadrant_logits)
-                - va_pred: 形状为(batch_size, 2)的回归预测
-                - quadrant_logits: 形状为(batch_size, 4)的象限分类logits
-            targets: VA值目标，形状为(batch_size, 2)
-            
-        返回:
-            总损失 = 回归损失 + quadrant_weight * 分类损失 + ccc_weight * ccc损失 + sign_weight * 符号损失
-        """
-        # 解包模型输出
-        va_pred, quadrant_logits = outputs
-        
-        # 更新类别权重并计算目标四象限
-        target_quadrant = self.update_class_weights(targets)
-        
-        # 1. 计算回归损失
-        regression_loss = self.base_loss(va_pred, targets)
-        
-        # 2. 计算分类损失
-        classification_loss = self.ce_loss(quadrant_logits, target_quadrant)
-        
-        # 3. 计算CCC损失
-        ccc_loss, _, _ = self.calculate_ccc_loss(va_pred, targets)
-        
-        # 4. 计算符号损失
-        sign_loss = self.calculate_sign_loss(va_pred, targets)
-        
-        # 5. 计算总损失
-        total_loss = regression_loss + \
-                     self.quadrant_weight * classification_loss + \
-                     self.ccc_weight * ccc_loss + \
-                     self.sign_weight * sign_loss
-        
-        # 保存各部分损失值
-        self.last_losses['regression'] = regression_loss.item()
-        self.last_losses['classification'] = classification_loss.item()
-        self.last_losses['ccc'] = ccc_loss
-        self.last_losses['sign'] = sign_loss.item()
-        self.last_losses['total'] = total_loss.item()
-        
-        # 计算和保存象限准确率
-        pred_quadrant = torch.argmax(quadrant_logits, dim=1)
-        accuracy = (pred_quadrant == target_quadrant).float().mean().item()
-        self.last_metrics['quadrant_accuracy'] = accuracy
-        
-        # 动态调整权重
-        self.adjust_weights()
-        
-        return total_loss
+# QuadrantClassificationLoss类已移除（简化版无需多任务学习头）
+# 该类用于处理四象限分类辅助任务与VA回归的联合损失函数
+# 简化版只使用基础损失函数（MSE或方向感知损失）
 
 
 def mixup_data(x, y, alpha=1.0):
@@ -1330,29 +1122,12 @@ def train_epoch(model, train_loader, optimizer, criterion, device, config, sched
     
     # 硬件配置
     use_amp = config.get('hardware', {}).get('precision', '') == 'mixed'
-    
-    # 新增: 初始化FGM对抗训练，如果启用
-    use_adversarial = config.get('optimization', {}).get('use_adversarial', False)
-    fgm = None
-    if use_adversarial:
-        epsilon = config.get('optimization', {}).get('adversarial_epsilon', 0.5)
-        emb_name = config.get('optimization', {}).get('adversarial_emb_name', 'embedding')
-        use_sign = config.get('optimization', {}).get('use_fgsm', True)  # 默认使用FGSM模式
-        fgm = FGM(model, epsilon=epsilon, emb_name=emb_name, use_sign=use_sign)
-        logger.info(f"启用对抗训练: 扰动大小={epsilon}, 使用梯度符号={use_sign}")
-    
-    # 新增: 初始化边界样本权重计算器，如果启用
-    use_boundary_weights = config.get('optimization', {}).get('use_boundary_weights', False)
+      # 简化版: 移除FGM对抗训练
+    use_adversarial = False  # 在简化版中不使用对抗训练
+    fgm = None  # 保留变量以避免后续代码出错
+      # 简化版: 移除边界样本权重计算器
+    use_boundary_weights = False  # 在简化版中不使用边界样本权重
     boundary_weighter = None
-    if use_boundary_weights:
-        boundary_threshold = config.get('optimization', {}).get('boundary_threshold', 0.15)
-        weight_multiplier = config.get('optimization', {}).get('boundary_weight_multiplier', 2.5)
-        boundary_weighter = BoundarySampleWeighter(
-            boundary_threshold=boundary_threshold,
-            weight_multiplier=weight_multiplier,
-            device=device
-        )
-        logger.info(f"启用边界样本权重: 阈值={boundary_threshold}, 权重倍增={weight_multiplier}")
     
     # 创建进度条
     pbar = tqdm(train_loader, desc="训练")
@@ -1462,36 +1237,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device, config, sched
             scaler.scale(loss).backward()
         else:
             loss.backward()
-        
-        # 新增: 应用对抗训练
-        if fgm is not None and (i + 1) % grad_accum_steps == 0:
-            # 添加扰动
-            fgm.attack()
-            
-            # 对抗样本的前向计算
-            with autocast('cuda') if use_amp else nullcontext():
-                adv_outputs = model(tokens, lengths, meta_features)
-                
-                # 计算对抗损失 - 同样处理元组输出的情况
-                if isinstance(adv_outputs, tuple) and len(adv_outputs) == 2:
-                    adv_loss = criterion(adv_outputs, targets)
-                else:
-                    adv_loss = criterion(adv_outputs, targets)
-                
-                # 应用样本权重
-                if sample_weights is not None:
-                    adv_loss = adv_loss * torch.mean(sample_weights)
-                
-                adv_loss = adv_loss / grad_accum_steps
-            
-            # 对抗损失的反向传播
-            if scaler is not None:
-                scaler.scale(adv_loss).backward()
-            else:
-                adv_loss.backward()
-            
-            # 恢复嵌入
-            fgm.restore()
+          # 简化版: 移除对抗训练部分
         
         # 检查梯度是否包含NaN
         valid_grads = True
@@ -1812,32 +1558,16 @@ def main():
     if config.get('loss', {}).get('use_mse_ccc_loss', False):
         mse_weight = config.get('loss', {}).get('mse_weight', 1.0)
         ccc_weight = config.get('loss', {}).get('ccc_weight', 0.0)
-        base_loss = MSE_CCC_Loss(mse_weight=mse_weight, ccc_weight=ccc_weight)
-    else:
-        # 检查是否使用标签平滑
-        if 'label_smoothing' in config.get('optimization', {}):
-            smoothing = config.get('optimization', {}).get('label_smoothing', 0.1)
-            base_loss = LabelSmoothingLoss(smoothing=smoothing)
-        else:
-            base_loss = nn.MSELoss()
-    
-    # 检查是否使用方向感知损失
+        base_loss = MSE_CCC_Loss(mse_weight=mse_weight, ccc_weight=ccc_weight)    else:
+        # 简化版本使用MSE损失
+        base_loss = nn.MSELoss()
+      # 检查是否使用方向感知损失
     if config.get('loss', {}).get('use_direction_loss', False):
         direction_weight = config.get('loss', {}).get('direction_weight', 0.5)
         valence_weight = config.get('loss', {}).get('valence_weight', 1.0)
         criterion = EmotionDirectionLoss(base_loss=base_loss, direction_weight=direction_weight, valence_weight=valence_weight)
-    elif config.get('model', {}).get('use_quadrant_head', False):
-        # 如果使用四象限分类头，使用专门的损失函数
-        quadrant_weight = config.get('model', {}).get('quadrant_weight', 0.5)
-        ccc_weight = config.get('loss', {}).get('ccc_weight', 0.3)
-        sign_weight = config.get('loss', {}).get('sign_weight', 0.2)
-        criterion = QuadrantClassificationLoss(
-            base_loss=base_loss, 
-            quadrant_weight=quadrant_weight, 
-            ccc_weight=ccc_weight,
-            sign_weight=sign_weight
-        )
     else:
+        # 简化版本只使用基础损失函数
         criterion = base_loss
     
     # 是否启用混合精度
