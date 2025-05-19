@@ -16,9 +16,8 @@ from .core import (
     LTCCell,
     NCPWiring,
     MultiLevelNCPWiring,
-    FGM,
-    BoundarySampleWeighter,
-    concordance_correlation_coefficient
+    concordance_correlation_coefficient,
+    XLMRTransformerBranch
 )
 
 # 公开导出组件
@@ -27,7 +26,6 @@ __all__ = [
     'LTCCell',
     'NCPWiring',
     'MultiLevelNCPWiring',
-    'FGM',
-    'BoundarySampleWeighter',
-    'concordance_correlation_coefficient'
-] 
+    'concordance_correlation_coefficient',
+    'XLMRTransformerBranch'
+]
