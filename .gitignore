@@ -110,10 +110,11 @@ coreml_model/
 *.mlpackage
 
 # Large model files - use Hugging Face to download these
+pretrained_models/
 pretrained_models/**/*.safetensors
 pretrained_models/**/*.bin
 pretrained_models/**/*.pth
-outputs/**/*.pth
+# outputs/**/*.pth
 # Keep model config files
 !pretrained_models/**/config.json
 !pretrained_models/**/tokenizer*.json
