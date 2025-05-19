@@ -28,6 +28,14 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import autocast, GradScaler
 
+import sys
+import os
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from src.core import LTC_NCP_RNN
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr, pearsonr

@@ -1558,7 +1558,8 @@ def main():
     if config.get('loss', {}).get('use_mse_ccc_loss', False):
         mse_weight = config.get('loss', {}).get('mse_weight', 1.0)
         ccc_weight = config.get('loss', {}).get('ccc_weight', 0.0)
-        base_loss = MSE_CCC_Loss(mse_weight=mse_weight, ccc_weight=ccc_weight)    else:
+        base_loss = MSE_CCC_Loss(mse_weight=mse_weight, ccc_weight=ccc_weight)    
+    else:
         # 简化版本使用MSE损失
         base_loss = nn.MSELoss()
       # 检查是否使用方向感知损失

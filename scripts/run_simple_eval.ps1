@@ -30,7 +30,8 @@ python src/evaluate_simple.py `
   --ckpt $MODEL_PATH `
   --data $TEST_DATA `
   --output $OUTPUT_DIR `
-  --batch_size $BATCH_SIZE
+  --batch_size $BATCH_SIZE `
+  --debug_fusion_gate True
 
 # 记录结束时间
 $END_TIME = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

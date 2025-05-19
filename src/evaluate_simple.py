@@ -18,6 +18,14 @@ from tqdm import tqdm
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr, pearsonr
 
+import sys
+import os
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from src.core import LTC_NCP_RNN
 from src.train_simple import SimpleTokenizer, EmotionDataset, concordance_correlation_coefficient
 from torch.utils.data import DataLoader
@@ -38,6 +46,7 @@ def parse_args():
     parser.add_argument('--output', type=str, default='results/evaluation', help='输出目录')
     parser.add_argument('--batch_size', type=int, default=64, help='批量大小')
     parser.add_argument('--device', type=str, default=None, help='设备(cuda或cpu)')
+    parser.add_argument('--debug_fusion_gate', type=bool, default=False, help='是否调试融合门控')
     
     return parser.parse_args()
 
@@ -98,12 +107,41 @@ def visualize_va_space(predictions, targets, output_path, n_samples=100, title="
     
     logger.info(f"VA空间可视化已保存至 {output_path}")
 
-def evaluate(model, test_loader, device, output_dir):
+def evaluate(model, test_loader, device, output_dir, debug_fusion_gate=False):
     """评估模型性能"""
     model.eval()
     
     all_predictions = []
     all_targets = []
+    fusion_gate_values = []  # 用于收集融合门控值
+      # 为分析融合门控创建钩子函数
+    fusion_gates_dict = {}
+    
+    def hook_fn(name):
+        def hook(module, input_tensor, output_tensor):
+            # 这里我们捕获的是应用sigmoid前的原始输出
+            # 我们需要手动应用sigmoid来得到真正的门控值
+            fusion_gates_dict[name] = torch.sigmoid(output_tensor).detach()
+        return hook
+      # 定义一个模型级别的钩子用于捕获融合门的最终值（sigmoid之后的值）
+    fusion_gate_final_value = None
+    
+    def fusion_gate_final_hook(module, input_tensor, output_tensor):
+        nonlocal fusion_gate_final_value
+        # 只在transformer分支中捕获融合门值
+        if module.use_transformer and hasattr(module, 'fusion_gate_linear'):
+            fusion_gate_final_value = output_tensor  # 在这里我们将捕获模型输出
+    
+    # 如果启用融合门调试且模型有融合门，注册钩子
+    hook = None
+    fusion_hook = None
+    if debug_fusion_gate:
+        if hasattr(model, 'fusion_gate_linear'):
+            # 注册前向钩子来捕获融合门控输出
+            hook = model.fusion_gate_linear.register_forward_hook(hook_fn('fusion_gate'))
+            # 注册模型级别的钩子用于捕获融合门的最终值
+            fusion_hook = model.register_forward_hook(fusion_gate_final_hook)
+            logger.info("已注册融合门调试钩子")
     
     # 禁用梯度计算
     with torch.no_grad():
@@ -120,14 +158,96 @@ def evaluate(model, test_loader, device, output_dir):
             
             # 计算模型输出
             outputs = model(tokens, lengths, meta_features)
+              # 收集融合门控值（如果启用调试）
+            if debug_fusion_gate and 'fusion_gate' in fusion_gates_dict:
+                fusion_gate = fusion_gates_dict['fusion_gate']
+                # 为每个样本提取最后时间步的融合门控值
+                if lengths is not None:
+                    batch_size = fusion_gate.size(0)
+                    last_fusion_gates = []
+                    for i in range(batch_size):
+                        seq_len = min(lengths[i].item(), fusion_gate.size(1))
+                        if seq_len > 0:
+                            last_fusion_gates.append(fusion_gate[i, seq_len-1].cpu())
+                        else:
+                            last_fusion_gates.append(fusion_gate[i, -1].cpu())
+                    fusion_gate_values.extend(last_fusion_gates)
+                else:
+                    # 如果没有长度信息，使用最后一个时间步
+                    fusion_gate_values.extend([gate[-1].cpu() for gate in fusion_gate])
             
             # 收集预测和目标
             all_predictions.append(outputs.detach().cpu())
             all_targets.append(targets.detach().cpu())
-    
-    # 将预测和目标拼接为两个大张量
+      # 将预测和目标拼接为两个大张量
     all_predictions = torch.cat(all_predictions, dim=0).numpy()
     all_targets = torch.cat(all_targets, dim=0).numpy()
+      # 如果启用融合门调试，分析并可视化融合门值
+    if debug_fusion_gate and fusion_gate_values:
+        # 移除钩子
+        if hook is not None:
+            hook.remove()
+        if fusion_hook is not None:
+            fusion_hook.remove()
+        
+        # 将融合门值转换为张量并计算统计信息
+        fusion_gate_tensor = torch.stack(fusion_gate_values, dim=0)
+        fusion_gate_mean = fusion_gate_tensor.mean(dim=0).numpy()
+        fusion_gate_std = fusion_gate_tensor.std(dim=0).numpy()
+        fusion_gate_min = fusion_gate_tensor.min(dim=0)[0].numpy()
+        fusion_gate_max = fusion_gate_tensor.max(dim=0)[0].numpy()
+        
+        # 输出融合门统计信息
+        logger.info("\n融合门控统计分析:")
+        logger.info(f"  平均值: {fusion_gate_mean.mean():.4f}")
+        logger.info(f"  标准差: {fusion_gate_std.mean():.4f}")
+        logger.info(f"  最小值: {fusion_gate_min.min():.4f}")
+        logger.info(f"  最大值: {fusion_gate_max.max():.4f}")
+        
+        # 如果融合门是向量，可视化前几个维度的分布
+        if fusion_gate_tensor.size(1) > 1:
+            # 可视化融合门分布
+            plt.figure(figsize=(12, 6))
+            
+            # 选择前5个维度或所有维度（取较小值）
+            dims_to_plot = min(5, fusion_gate_tensor.size(1))
+            for i in range(dims_to_plot):
+                plt.hist(fusion_gate_tensor[:, i].numpy(), bins=30, alpha=0.5, label=f'维度 {i}')
+            
+            plt.title('融合门控值分布')
+            plt.xlabel('门控值')
+            plt.ylabel('频率')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            # 保存图像
+            fusion_gate_hist_path = os.path.join(output_dir, 'fusion_gate_distribution.png')
+            plt.savefig(fusion_gate_hist_path)
+            plt.close()
+            logger.info(f"融合门控分布已保存至 {fusion_gate_hist_path}")
+        
+        # 可视化融合门取值范围
+        plt.figure(figsize=(10, 6))
+        
+        # 绘制均值和范围
+        dims = range(min(20, fusion_gate_tensor.size(1)))
+        plt.errorbar(dims, fusion_gate_mean[:len(dims)], 
+                     yerr=[fusion_gate_mean[:len(dims)] - fusion_gate_min[:len(dims)],
+                           fusion_gate_max[:len(dims)] - fusion_gate_mean[:len(dims)]],
+                     fmt='o', capsize=5, elinewidth=1, markeredgewidth=1)
+        
+        plt.title('融合门控值范围统计')
+        plt.xlabel('维度')
+        plt.ylabel('门控值')
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.5, color='red', linestyle='--', alpha=0.7, label='中点 (0.5)')
+        plt.legend()
+        
+        # 保存图像
+        fusion_gate_range_path = os.path.join(output_dir, 'fusion_gate_ranges.png')
+        plt.savefig(fusion_gate_range_path)
+        plt.close()
+        logger.info(f"融合门控范围统计已保存至 {fusion_gate_range_path}")
     
     # 分别计算V和A的指标
     v_mse = mean_squared_error(all_targets[:, 0], all_predictions[:, 0])
@@ -291,10 +411,9 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"模型参数总数: {total_params:,}, 可训练参数: {trainable_params:,}")
-    
-    # 评估模型
+      # 评估模型
     logger.info("开始评估...")
-    results, predictions, targets = evaluate(model, test_loader, device, output_dir)
+    results, predictions, targets = evaluate(model, test_loader, device, output_dir, args.debug_fusion_gate)
     
     logger.info(f"评估完成! 结果保存在 {output_dir}")
     return results

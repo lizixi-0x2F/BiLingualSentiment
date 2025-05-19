@@ -371,8 +371,7 @@ class LTC_NCP_RNN(nn.Module):
         self.hidden_output_size = hidden_output_size
         
         # 添加特征维度转换层 - 新增，解决维度不匹配问题
-        self.feature_adapter = nn.Linear(hidden_output_size, hidden_output_size)
-          # 添加Transformer模块
+        self.feature_adapter = nn.Linear(hidden_output_size, hidden_output_size)        # 添加Transformer模块
         if use_transformer:
             self.transformer = MiniTransformer(
                 d_model=hidden_output_size,
@@ -384,6 +383,9 @@ class LTC_NCP_RNN(nn.Module):
             
             # 添加Transformer输出适配层 - 新增，保持维度一致性
             self.transformer_adapter = nn.Linear(hidden_output_size, hidden_output_size)
+            
+            # 添加融合门控 - 新增，用于动态融合Transformer和LTC-NCP输出
+            self.fusion_gate_linear = nn.Linear(hidden_output_size * 2, hidden_output_size)
         
         # 添加Mixture of Experts模块
         self.use_moe = use_moe
@@ -738,8 +740,7 @@ class LTC_NCP_RNN(nn.Module):
                 
                 # 应用transformer处理
                 transformed_out = self.transformer(combined_out, src_key_padding_mask=padding_mask)
-                
-                # 检查Transformer输出
+                  # 检查Transformer输出
                 debug_print(f"Transformer输出形状: {transformed_out.shape}")
                 
                 # 通过adapter保持维度一致性 - 新增
@@ -750,7 +751,36 @@ class LTC_NCP_RNN(nn.Module):
                 if torch.isnan(transformed_out).any():
                     print("警告: Transformer输出包含NaN值，回退到原始输出") if DEBUG else None
                     transformed_out = combined_out
-                combined_out = transformed_out
+                
+                # 保存LTC-NCP输出用于融合门控
+                ltc_ncp_out = combined_out
+                  # 实现融合门控 fusion_gate = sigmoid(W_cat([h_transformer, h_ltc]))
+                # 1. 拼接Transformer和LTC-NCP的输出
+                concat_out = torch.cat([transformed_out, ltc_ncp_out], dim=2)
+                
+                # 2. 计算融合门控值
+                # 处理形状变换 - 原始: [batch, seq_len, hidden_size*2]
+                batch_size, seq_len, concat_dim = concat_out.shape
+                # 重塑为二维张量，方便应用线性层
+                reshaped_concat = concat_out.reshape(-1, concat_dim)
+                # 应用线性层
+                reshaped_gate = torch.sigmoid(self.fusion_gate_linear(reshaped_concat))
+                # 恢复原始形状
+                fusion_gate = reshaped_gate.reshape(batch_size, seq_len, -1)
+                
+                # 3. 使用clamp确保数值稳定性，将门控值限制在(0,1)范围内
+                fusion_gate = torch.clamp(fusion_gate, 0.01, 0.99)
+                  # 打印门控平均值 - 始终打印而不是仅调试模式
+                gate_mean = fusion_gate.mean().item()
+                print(f"融合门控平均值: {gate_mean:.4f}")
+                
+                # 确保门控形状与输出匹配 - 同时验证两个输入的形状
+                assert fusion_gate.shape == transformed_out.shape, f"门控形状 {fusion_gate.shape} 与Transformer输出形状 {transformed_out.shape} 不匹配"
+                assert fusion_gate.shape == ltc_ncp_out.shape, f"门控形状 {fusion_gate.shape} 与LTC-NCP输出形状 {ltc_ncp_out.shape} 不匹配"
+                print(f"形状验证通过: 门控形状 {fusion_gate.shape} 与输入输出匹配")
+                
+                # 4. 使用门控值融合两个输出
+                combined_out = fusion_gate * transformed_out + (1 - fusion_gate) * ltc_ncp_out
             except Exception as e:
                 print(f"警告: Transformer层出错，回退到原始输出: {e}")
                 # 保持combined_out不变
