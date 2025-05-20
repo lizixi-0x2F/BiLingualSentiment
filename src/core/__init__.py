@@ -2,15 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-LTC-NCP-RNN模型核心模块
+LTC-NCP-RNN模型核心模块 - 简化版
+移除了对抗训练、软标签和多任务学习头
 """
 
 from .cells import LTCCell
 from .wiring import NCPWiring, MultiLevelNCPWiring
 from .model import LTC_NCP_RNN
-from .adversarial import FGM
-from .boundary_weights import BoundarySampleWeighter
 from .pos_features import extract_combined_pos_features, preprocess_batch_texts
+from .transformer_branch import XLMRTransformerBranch
+from .linformer_attention import LinformerSelfAttention
+from .linformer_transformer import LinformerEncoderLayer
+from .linformer_mini_transformer import LinformerMiniTransformer
 try:
     from .utils import concordance_correlation_coefficient
 except (ImportError, AttributeError):
@@ -40,9 +43,11 @@ __all__ = [
     'NCPWiring',
     'MultiLevelNCPWiring',
     'LTC_NCP_RNN',
-    'FGM',
-    'BoundarySampleWeighter',
+    'XLMRTransformerBranch',
     'extract_combined_pos_features',
     'preprocess_batch_texts',
-    'concordance_correlation_coefficient'
+    'concordance_correlation_coefficient',
+    'LinformerSelfAttention',
+    'LinformerEncoderLayer',
+    'LinformerMiniTransformer'
 ]

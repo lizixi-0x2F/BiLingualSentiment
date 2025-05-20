@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 from .cells import LTCCell
 from .wiring import NCPWiring, MultiLevelNCPWiring
+from .modules.moe import MoE
 
 # 全局调试标志，设为True启用调试输出
 DEBUG = True
@@ -235,7 +236,6 @@ class LTC_NCP_RNN(nn.Module):
     用于文本情感价效度回归，支持双语输入
     增加了四象限分类辅助任务头
     """
-    
     def __init__(self, 
                 vocab_size: int,
                 embedding_dim: int,
@@ -248,17 +248,18 @@ class LTC_NCP_RNN(nn.Module):
                 use_meta_features: bool = True,
                 bidirectional: bool = False,
                 padding_idx: Optional[int] = None,
-                wiring_type: str = 'structured',  # 新增：连接类型
-                multi_level: bool = True,         # 新增：是否使用多层次连接
-                emotion_focused: bool = True,     # 新增：情感感知连接
-                heterogeneous: bool = True,       # 新增：异构连接密度
-                use_transformer: bool = False,    # 新增：是否使用Transformer
-                invert_valence: bool = False,     # 新增：是否反转价值预测
-                invert_arousal: bool = False,     # 新增：是否反转效度预测
-                enhance_valence: bool = False,    # 新增：是否增强价值预测能力
-                valence_layers: int = 2,          # 新增：价值分支的额外层数
-                use_quadrant_head: bool = True,   # 新增：是否使用四象限分类头
-                quadrant_weight: float = 0.3,     # 新增：四象限分类损失权重
+                wiring_type: str = 'structured',  # 新增：连接类型                
+                multi_level: bool = False,        # 是否使用多层次连接
+                emotion_focused: bool = False,    # 情感感知连接
+                heterogeneous: bool = False,      # 异构连接密度
+                use_transformer: bool = False,    # 是否使用Transformer
+                use_moe: bool = False,            # 是否使用Mixture of Experts
+                invert_valence: bool = False,     # 是否反转价值预测
+                invert_arousal: bool = False,     # 是否反转效度预测
+                enhance_valence: bool = False,    # 是否增强价值预测能力
+                valence_layers: int = 1,          # 价值分支的额外层数
+                use_quadrant_head: bool = False,  # 是否使用四象限分类头
+                quadrant_weight: float = 0.0,     # 四象限分类损失权重
                 **kwargs                          # 新增：接受任意关键字参数
                ):
         """
@@ -370,9 +371,7 @@ class LTC_NCP_RNN(nn.Module):
         self.hidden_output_size = hidden_output_size
         
         # 添加特征维度转换层 - 新增，解决维度不匹配问题
-        self.feature_adapter = nn.Linear(hidden_output_size, hidden_output_size)
-        
-        # 添加Transformer模块
+        self.feature_adapter = nn.Linear(hidden_output_size, hidden_output_size)        # 添加Transformer模块
         if use_transformer:
             self.transformer = MiniTransformer(
                 d_model=hidden_output_size,
@@ -384,6 +383,21 @@ class LTC_NCP_RNN(nn.Module):
             
             # 添加Transformer输出适配层 - 新增，保持维度一致性
             self.transformer_adapter = nn.Linear(hidden_output_size, hidden_output_size)
+            
+            # 添加融合门控 - 新增，用于动态融合Transformer和LTC-NCP输出
+            self.fusion_gate_linear = nn.Linear(hidden_output_size * 2, hidden_output_size)
+        
+        # 添加Mixture of Experts模块
+        self.use_moe = use_moe
+        if use_moe:
+            self.moe = MoE(
+                input_dim=hidden_output_size,
+                output_dim=hidden_output_size,
+                num_experts=4,
+                k=2,
+                expert_hidden_dim=hidden_output_size*2,
+                dropout=dropout/2
+            )
         
         # 如果使用元特征，增加输入维度
         self.meta_feature_size = 0
@@ -527,19 +541,7 @@ class LTC_NCP_RNN(nn.Module):
             nn.Linear(hidden_size, 1),
             nn.Sigmoid()
         )
-        
-        # 6. 新增：四象限分类头 - 直接预测四个象限类别
-        if use_quadrant_head:
-            self.quadrant_head = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_size, hidden_size // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout/2),
-                nn.Linear(hidden_size // 2, 4)  # 输出4个象限类别的logits
-            )
-            print(f"创建四象限分类辅助任务头，输入维度: {hidden_size}，权重: {quadrant_weight}")
+          # 四象限分类头已移除
     
     def _process_sequence(self, embedded, mask=None):
         """处理序列的正向传播"""
@@ -738,8 +740,7 @@ class LTC_NCP_RNN(nn.Module):
                 
                 # 应用transformer处理
                 transformed_out = self.transformer(combined_out, src_key_padding_mask=padding_mask)
-                
-                # 检查Transformer输出
+                  # 检查Transformer输出
                 debug_print(f"Transformer输出形状: {transformed_out.shape}")
                 
                 # 通过adapter保持维度一致性 - 新增
@@ -750,7 +751,36 @@ class LTC_NCP_RNN(nn.Module):
                 if torch.isnan(transformed_out).any():
                     print("警告: Transformer输出包含NaN值，回退到原始输出") if DEBUG else None
                     transformed_out = combined_out
-                combined_out = transformed_out
+                
+                # 保存LTC-NCP输出用于融合门控
+                ltc_ncp_out = combined_out
+                  # 实现融合门控 fusion_gate = sigmoid(W_cat([h_transformer, h_ltc]))
+                # 1. 拼接Transformer和LTC-NCP的输出
+                concat_out = torch.cat([transformed_out, ltc_ncp_out], dim=2)
+                
+                # 2. 计算融合门控值
+                # 处理形状变换 - 原始: [batch, seq_len, hidden_size*2]
+                batch_size, seq_len, concat_dim = concat_out.shape
+                # 重塑为二维张量，方便应用线性层
+                reshaped_concat = concat_out.reshape(-1, concat_dim)
+                # 应用线性层
+                reshaped_gate = torch.sigmoid(self.fusion_gate_linear(reshaped_concat))
+                # 恢复原始形状
+                fusion_gate = reshaped_gate.reshape(batch_size, seq_len, -1)
+                
+                # 3. 使用clamp确保数值稳定性，将门控值限制在(0,1)范围内
+                fusion_gate = torch.clamp(fusion_gate, 0.01, 0.99)
+                  # 打印门控平均值 - 始终打印而不是仅调试模式
+                gate_mean = fusion_gate.mean().item()
+                print(f"融合门控平均值: {gate_mean:.4f}")
+                  # 确保门控形状与输出匹配 - 同时验证两个输入的形状
+                assert fusion_gate.shape == transformed_out.shape, f"门控形状 {fusion_gate.shape} 与Transformer输出形状 {transformed_out.shape} 不匹配"
+                assert fusion_gate.shape == ltc_ncp_out.shape, f"门控形状 {fusion_gate.shape} 与LTC-NCP输出形状 {ltc_ncp_out.shape} 不匹配"
+                if DEBUG:
+                    print(f"形状验证通过: 门控形状 {fusion_gate.shape} 与输入输出匹配")
+                
+                # 4. 使用门控值融合两个输出
+                combined_out = fusion_gate * transformed_out + (1 - fusion_gate) * ltc_ncp_out
             except Exception as e:
                 print(f"警告: Transformer层出错，回退到原始输出: {e}")
                 # 保持combined_out不变
@@ -802,20 +832,26 @@ class LTC_NCP_RNN(nn.Module):
         
         # 确保维度匹配 - 如果不匹配，进行调整
         if final_hidden.size(1) != self.total_input_size:
-            print(f"警告: 输入维度不匹配 ({final_hidden.size(1)} vs {self.total_input_size})，调整中...")
+            if DEBUG:
+                print(f"信息: 输入维度调整 ({final_hidden.size(1)} -> {self.total_input_size})，正在自动处理...")
+            else:
+                # 在非调试模式下使用更简洁的消息
+                print(f"维度自动适配: {final_hidden.size(1)} -> {self.total_input_size}")
+                
             if final_hidden.size(1) > self.total_input_size:
                 # 截断多余维度
                 final_hidden = final_hidden[:, :self.total_input_size]
-                print(f"已裁剪维度至: {final_hidden.size(1)}")
+                if DEBUG:
+                    print(f"已裁剪维度至: {final_hidden.size(1)}")
             else:
                 # 填充不足的维度
                 padding = torch.zeros(final_hidden.size(0), 
                                      self.total_input_size - final_hidden.size(1),
                                      device=final_hidden.device)
                 final_hidden = torch.cat([final_hidden, padding], dim=1)
-                print(f"已填充维度至: {final_hidden.size(1)}")
-        
-        # 使用预定义的输入适配器处理维度
+                if DEBUG:
+                    print(f"已填充维度至: {final_hidden.size(1)}")
+          # 使用预定义的输入适配器处理维度
         try:
             final_hidden = self.input_adapter(final_hidden)
             debug_print(f"应用输入适配器后维度: {final_hidden.shape}")
@@ -823,6 +859,34 @@ class LTC_NCP_RNN(nn.Module):
             print(f"输入适配器错误: {e}，输入维度: {final_hidden.shape}")
             # 创建紧急备用
             final_hidden = torch.zeros(final_hidden.size(0), self.hidden_size, device=final_hidden.device)
+        
+        # 应用Mixture of Experts层（如果启用）
+        if self.use_moe:
+            try:
+                # 确保数据类型匹配
+                final_hidden = final_hidden.to(torch.float32)
+                
+                # 应用MoE处理
+                debug_print(f"MoE输入形状: {final_hidden.shape}")
+                moe_out = self.moe(final_hidden)
+                
+                # 检查MoE输出
+                debug_print(f"MoE输出形状: {moe_out.shape}")
+                
+                # 检查MoE输出是否有NaN
+                if torch.isnan(moe_out).any():
+                    print("警告: MoE输出包含NaN值，回退到原始输出") if DEBUG else None
+                    moe_out = final_hidden
+                final_hidden = moe_out
+                
+                # 如果是调试模式，输出专家使用情况
+                if DEBUG:
+                    _, expert_usage, load_balancing = self.moe.get_routing_stats(final_hidden)
+                    debug_print(f"MoE专家使用情况: {expert_usage.tolist()}, 负载均衡: {load_balancing:.4f}")
+                
+            except Exception as e:
+                print(f"警告: MoE层出错，回退到原始输出: {e}")
+                # 保持final_hidden不变
         
         # 8. 通过共享基础层
         try:
@@ -935,26 +999,8 @@ class LTC_NCP_RNN(nn.Module):
                 outputs_clone[:, 1] = -outputs[:, 1]  # 反转效度维度
                 
             outputs = outputs_clone
-        
-        # 新增：四象限分类预测
-        quadrant_logits = None
-        if self.use_quadrant_head:
-            try:
-                quadrant_logits = self.quadrant_head(shared_features)
-                
-                # 检查是否有NaN值
-                if torch.isnan(quadrant_logits).any():
-                    print("警告: 四象限分类输出包含NaN值，使用0替换") if DEBUG else None
-                    quadrant_logits = torch.nan_to_num(quadrant_logits, nan=0.0)
-            except Exception as e:
-                print(f"警告: 四象限分类头处理出错: {e}")
-                quadrant_logits = torch.zeros(final_hidden.size(0), 4, device=final_hidden.device)
-        
-        # 返回VA回归输出和四象限分类预测
-        if self.use_quadrant_head:
-            return outputs, quadrant_logits
-        else:
-            return outputs
+          # 直接返回VA回归输出，不包含四象限分类预测
+        return outputs
     
     def get_stats(self):
         """获取模型统计信息"""
@@ -966,10 +1012,7 @@ class LTC_NCP_RNN(nn.Module):
             'interaction_norm': sum(p.norm().item() for p in self.emotion_interaction.parameters()),
             'attention_norm': sum(p.norm().item() for p in self.attention.parameters())
         }
-        
-        # 添加四象限分类头统计
-        if self.use_quadrant_head:
-            stats['quadrant_head_norm'] = sum(p.norm().item() for p in self.quadrant_head.parameters())
+          # 四象限分类头已移除
         
         # 添加LTC细胞统计
         if self.multi_level:

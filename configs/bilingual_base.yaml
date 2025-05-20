@@ -28,8 +28,9 @@ model:
   dropout: 0.3
   sparsity_level: 0.75
   dt: 1.0
-  integration_method: "euler"  # "euler" 或 "rk4"
-  bidirectional: true
+  integration_method: "euler"  # "euler" 或 "rk4"  bidirectional: true
+  use_transformer: true
+  use_moe: true
   
 # 训练配置
 training:
