@@ -24,17 +24,20 @@ checkpoints/
 *.mlmodel
 *.mlpackage
 *.onnx
-models/
+/models/
+/XLM-R/
+*.safetensors
+*.bin
 
 # 数据
-data/
-datasets/
-*.csv
-*.json
-*.jsonl
-*.tsv
-*.h5
-*.hdf5
+/data/*.csv
+/data/*.json
+/data/*.jsonl
+/data/*.tsv
+/data/*.h5
+/data/*.hdf5
+/data/*.txt
+!/data/README.md
 
 # 日志和输出
 logs/
@@ -45,16 +48,18 @@ wandb/
 results/
 output/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# 临时文件
+# 临时文件和其他大文件
 mac_transfer_package/
 mac_transfer_package.tar.gz
 *.tar.gz
 tmp/
-temp/ 
+temp/
+transfer_package/
+results.json
+
+# 保留必要源代码和配置
+!src/
+!src/models/
+!src/data/
+!src/utils/
+!configs/ 

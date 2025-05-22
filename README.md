@@ -19,7 +19,6 @@
 
 - 跨语言迁移：利用XLM-R的多语言能力，在中英文语料上均具有良好表现
 - 知识蒸馏：将大型预训练模型的知识迁移到轻量级模型
-- 移动端部署：支持导出为ONNX和Core ML格式，便于在移动设备上部署
 - 高效推理：学生模型体积小、速度快，适合资源受限场景
 
 ## 训练技术
@@ -41,7 +40,6 @@ BiLingualSentiment/
 ├── scripts/            # 实用脚本
 ├── config/             # 配置文件
 ├── checkpoints/        # 模型检查点（不包含在Git中）
-└── models/             # 导出的模型（不包含在Git中）
 ```
 
 ## 安装与使用
@@ -78,16 +76,6 @@ python -m src.train_student
 ```bash
 # 使用模型进行推理
 python -m src.inference --text "这是一个测试文本" --model_path checkpoints/student_small/best_model.pt
-```
-
-### 导出模型
-
-```bash
-# 导出为ONNX格式
-python -m src.pytorch_to_onnx --model_path checkpoints/student_small/best_model.pt
-
-# 导出为Core ML格式 (仅macOS)
-python mac_convert.py
 ```
 
 ## 模型尺寸选择
