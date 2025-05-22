@@ -1,88 +1,60 @@
-# Python相关
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# 虚拟环境
-.env
-.venv
 env/
 venv/
+.env/
+.venv/
 ENV/
 env.bak/
 venv.bak/
+.python-version
+*.egg-info/
+.installed.cfg
+*.egg
 
-# 模型检查点
+# 模型文件和检查点
 checkpoints/
-runs/
 *.pt
 *.pth
 *.ckpt
-*.safetensors
+*.mlmodel
+*.mlpackage
+*.onnx
+models/
 
-# 日志文件
-logs/
-*.log
-training_*.log
-training_log.txt
-
-# 临时文件
-backup/
-.backup/
-tmp/
-temp/
-
-# 数据文件
-data/processed/
-data/raw/
+# 数据
+data/
+datasets/
 *.csv
 *.json
-*.pkl
+*.jsonl
+*.tsv
 *.h5
+*.hdf5
 
-# 结果和输出
+# 日志和输出
+logs/
+*.log
+runs/
+tensorboard/
+wandb/
 results/
 output/
-*.png
-*.jpg
-*.jpeg
-*.pdf
 
-# IDE相关
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# 系统文件
 .DS_Store
-.ipynb_checkpoints
-Thumbs.db
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
 
-# 项目特定
-nohup.out
-*.bak
-calibrate.py
-*_error.log
+# 临时文件
+mac_transfer_package/
+mac_transfer_package.tar.gz
+*.tar.gz
+tmp/
+temp/ 

@@ -1,169 +1,104 @@
-# LTC-NCP-VA: 基于液态时间常数网络的文本情感价效度分析
+# BiLingualSentiment - 双语情感分析系统
 
-## 项目概述
+基于PyTorch和LTC神经电路的双语（中英文）情感分析系统，支持预测文本的效价(Valence)和唤醒度(Arousal)值。项目采用教师-学生知识蒸馏架构，实现轻量级推理模型。
 
-LTC-NCP-VA是一个专注于文本情感价效度(Valence-Arousal)分析的深度学习框架，基于液态时间常数(Liquid Time-Constant)网络与神经电路策略(Neural Circuit Policy)的创新组合。本项目能够从文本中提取情感的两个核心维度：价值(Valence，情感的正负极性)和效度(Arousal，情感的激烈程度)，实现更细粒度的情感分析。
+## 项目架构
 
-### 价效度(VA)空间解释
+### 教师模型
+- 基础模型：XLM-R-Base
+- 神经电路：LTC_NCP (Liquid Time-Constant Neural Circuit Policies)
+- 目标性能：CCC ≥ 70%
 
-情感价效度空间将情感映射到二维坐标系中：
+### 学生模型
+- 基础模型：Mini Transformer
+- 神经电路：LTC_NCP
+- 目标性能：相对教师模型的CCC ≥ 95%
+- 提供多种尺寸：Micro、Small、Medium、Large-S
 
-- **价值(Valence)**: 横轴，表示情感的正负程度，范围[-1, 1]
-  - 正值表示积极情感(如喜悦、满足)
-  - 负值表示消极情感(如悲伤、愤怒)
+## 功能特点
 
-- **效度(Arousal)**: 纵轴，表示情感的激烈程度，范围[-1, 1]
-  - 正值表示高唤起(如兴奋、愤怒)
-  - 负值表示低唤起(如平静、疲倦)
+- 跨语言迁移：利用XLM-R的多语言能力，在中英文语料上均具有良好表现
+- 知识蒸馏：将大型预训练模型的知识迁移到轻量级模型
+- 移动端部署：支持导出为ONNX和Core ML格式，便于在移动设备上部署
+- 高效推理：学生模型体积小、速度快，适合资源受限场景
 
-四个象限代表不同的情感类别：
-- 第一象限(+V, +A): 喜悦/兴奋
-- 第二象限(+V, -A): 满足/平静
-- 第三象限(-V, +A): 愤怒/焦虑
-- 第四象限(-V, -A): 悲伤/抑郁
+## 训练技术
 
-## 核心特性
+- R-Drop正则化
+- GradNorm梯度平衡
+- FGM对抗训练
+- 知识蒸馏
 
-- **双语支持**: 同时支持中文和英文文本的情感分析
-- **细粒度情感**: 不仅分析情感极性，还能识别情感强度和激烈程度
-- **LTC神经网络**: 基于液态时间常数的递归神经网络，适合处理时序信息
-- **NCP稀疏连接**: 使用神经电路策略实现高效稀疏连接，提高泛化能力
-- **先进增强技术**: 
-  - **FGM对抗训练**: 通过向嵌入层添加扰动增强模型鲁棒性
-  - **边界样本权重**: 对VA空间中的边界样本给予更高权重，提高区分能力
-  - **VA多任务学习**: 联合优化VA回归与四象限分类，提高预测准确性
+## 目录结构
 
-## 模型架构
-
-LTC-NCP-RNN模型结合了多项先进技术：
-
-1. **液态时间常数(LTC)细胞**: 一种改进的RNN单元，通过可学习的时间常数处理不同时间尺度的依赖关系
-2. **神经电路策略(NCP)布线**: 基于神经科学的稀疏连接方案，降低参数量，提高泛化能力
-3. **分支架构**: 专门的V分支和A分支分别处理价值和效度预测
-4. **多任务学习**: 同时进行VA回归和四象限分类，互相促进性能提升
-5. **注意力机制**: 引入注意力层突出重要特征
-6. **情感方向感知**: 特殊设计的损失函数，对情感象限预测错误施加更高惩罚
-
-## 安装与设置
-
-### 环境要求
-
-- Python 3.8+
-- PyTorch 1.12+
-- CUDA 11.6+ (GPU训练推荐)
-
-### 安装步骤
-
-1. 克隆仓库
-```bash
-git clone https://github.com/yourusername/ltc-ncp-va.git
-cd ltc-ncp-va
+```
+BiLingualSentiment/
+├── src/                # 源代码
+│   ├── data/           # 数据处理模块
+│   ├── models/         # 模型定义
+│   ├── training/       # 训练相关代码
+│   └── utils/          # 工具函数
+├── scripts/            # 实用脚本
+├── config/             # 配置文件
+├── checkpoints/        # 模型检查点（不包含在Git中）
+└── models/             # 导出的模型（不包含在Git中）
 ```
 
-2. 创建并激活虚拟环境(可选)
-```bash
-conda create -n ltc-ncp-va python=3.8
-conda activate ltc-ncp-va
-```
+## 安装与使用
 
-3. 安装依赖
+### 环境配置
+
 ```bash
+# 克隆仓库
+git clone https://github.com/yourusername/BiLingualSentiment.git
+cd BiLingualSentiment
+
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或
+venv\Scripts\activate  # Windows
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-## 使用方法
-
 ### 训练模型
 
-使用标准配置训练模型：
 ```bash
-python src/train.py --config configs/valence_enhanced.yaml
+# 训练教师模型
+python -m src.train_teacher
+
+# 训练学生模型
+python -m src.train_student
 ```
 
-使用FGM对抗训练和VA多任务学习：
+### 推理
+
 ```bash
-python src/train.py --config configs/valence_enhanced.yaml --epochs 50
+# 使用模型进行推理
+python -m src.inference --text "这是一个测试文本" --model_path checkpoints/student_small/best_model.pt
 ```
 
-使用screen后台训练：
+### 导出模型
+
 ```bash
-./scripts/run_5m_training.sh
+# 导出为ONNX格式
+python -m src.pytorch_to_onnx --model_path checkpoints/student_small/best_model.pt
+
+# 导出为Core ML格式 (仅macOS)
+python mac_convert.py
 ```
 
-### 评估模型
+## 模型尺寸选择
 
-在测试集上评估模型性能：
-```bash
-python src/evaluate.py --ckpt runs/models/best_model.pt --output results/evaluation
-```
-
-### 情感预测
-
-使用训练好的模型进行情感预测：
-```bash
-python src/emotion_predict.py --text "这是一段测试文本，我感到非常高兴！"
-```
-
-或进入交互模式：
-```bash
-python src/emotion_predict.py
-```
-
-## 项目结构
-
-```
-├── configs/                # 配置文件
-├── src/                    # 源代码
-│   ├── core/               # 核心模型实现
-│   │   ├── cells.py        # LTC细胞实现
-│   │   ├── wiring.py       # NCP布线实现
-│   │   ├── model.py        # LTC-NCP-RNN模型定义
-│   │   ├── adversarial.py  # FGM对抗训练
-│   │   └── boundary_weights.py # 边界样本权重
-│   ├── train.py            # 训练脚本
-│   ├── evaluate.py         # 评估脚本
-│   └── emotion_predict.py  # 情感预测脚本
-├── scripts/                # 辅助脚本
-├── data/                   # 数据目录
-│   ├── processed/          # 处理后的数据
-│   └── raw/                # 原始数据
-├── checkpoints/            # 模型检查点
-├── runs/                   # 训练运行目录
-│   └── models/             # 训练好的模型
-├── logs/                   # 日志文件
-├── results/                # 评估结果
-├── docs/                   # 文档
-└── reports/                # 项目报告
-```
-
-## 性能指标
-
-在双语情感数据集上的表现：
-
-| 指标 | 价值(Valence) | 效度(Arousal) | 平均 |
-|------|--------------|--------------|------|
-| CCC  | 0.823        | 0.791        | 0.807|
-| RMSE | 0.342        | 0.375        | 0.359|
-| 象限准确率 | - | - | 78.6% |
-
-## 贡献者
-
-- 李子溪 (LiZiXi)
+| 模型 | 隐藏层维度 | 层数 | 注意力头数 | 参数量 | 推荐场景 |
+|------|------------|------|------------|--------|----------|
+| Micro | 384 | 4 | 6 | ~5M | 低端移动设备 |
+| Small | 512 | 6 | 8 | ~10M | 中端移动设备 |
+| Medium | 640 | 8 | 10 | ~15M | 高端移动设备 |
+| Large-S | 768 | 10 | 12 | ~25M | 服务器/桌面端 |
 
 ## 许可证
 
-本项目采用MIT许可证。详见[LICENSE](LICENSE)文件。
-
-## 引用
-
-如果你在研究中使用了LTC-NCP-VA，请引用：
-
-```
-@misc{lizx2023ltcncpva,
-  author = {Li, Zixi},
-  title = {LTC-NCP-VA: Text Emotion Analysis with Liquid Time-Constant Networks},
-  year = {2023},
-  publisher = {GitHub},
-  url = {https://github.com/yourusername/ltc-ncp-va}
-}
-```
+[MIT License](LICENSE)
