@@ -1,0 +1,40 @@
+{
+  "model": {
+    "base_model_name": "xlm-roberta-base",
+    "ltc_hidden_size": 128,
+    "ltc_memory_size": 32,
+    "ltc_num_layers": 2,
+    "ltc_dropout": 0.1,
+    "output_dim": 2
+  },
+  "training": {
+    "batch_size": 32,
+    "learning_rate": 2e-5,
+    "warmup_ratio": 0.1,
+    "weight_decay": 0.01,
+    "max_epochs": 30,
+    "early_stopping_patience": 5,
+    "num_workers": 2,
+    "seed": 42,
+    "gradient_accumulation_steps": 1,
+    "fp16": false
+  },
+  "regularization": {
+    "use_rdrop": true,
+    "rdrop_alpha": 0.5,
+    "use_gradnorm": true,
+    "use_fgm": true,
+    "fgm_epsilon": 1e-3
+  },
+  "data": {
+    "chinese_va_data_path": "data/Chinese_VA_dataset_gaussNoise.csv",
+    "english_va_data_path": "data/emobank_va_normalized.csv",
+    "max_length": 128,
+    "val_ratio": 0.2,
+    "test_ratio": 0.2
+  },
+  "output": {
+    "save_dir": "checkpoints/teacher",
+    "log_dir": "logs/teacher"
+  }
+} 
